@@ -21,7 +21,8 @@ function divIcon(className: string, html: string, size = 28) {
 }
 
 function arrow(heading: number, color: string) {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" style="transform: rotate(${heading}deg)"><path d="M12 2 L19 21 L12 17 L5 21 Z" fill="${color}" stroke="#0b1220" stroke-width="1.2"/></svg>`;
+  const deg = Number.isFinite(Number(heading)) ? Number(heading) : 0;
+  return `<svg viewBox="0 0 24 24" width="22" height="22" style="transform: rotate(${deg}deg)"><path d="M12 2 L19 21 L12 17 L5 21 Z" fill="${color}" stroke="#0b1220" stroke-width="1.2"/></svg>`;
 }
 
 function FlyTo({ focus }: { focus: FocusTarget | null }) {

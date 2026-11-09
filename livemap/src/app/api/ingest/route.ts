@@ -12,6 +12,25 @@ function authorized(request: Request) {
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
+async function readLimited(request: Request, maxBytes: number): Promise<string | null> {
+  if (Number(request.headers.get("content-length") ?? 0) > maxBytes) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 // The DCS host pushes livemap.json here (see scripts/push-state.mjs).
 export async function POST(request: Request) {
   if (!process.env.LIVEMAP_INGEST_TOKEN) {
@@ -20,13 +39,13 @@ export async function POST(request: Request) {
   if (!authorized(request)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const length = Number(request.headers.get("content-length") ?? 0);
-  if (length > MAX_BODY_BYTES) {
+  const text = await readLimited(request, MAX_BODY_BYTES);
+  if (text === null) {
     return Response.json({ error: "Snapshot too large" }, { status: 413 });
   }
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(text);
   } catch {
     return Response.json({ error: "Body must be JSON" }, { status: 400 });
   }
