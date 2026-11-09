@@ -198,6 +198,9 @@
   0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.8); }
   100% { box-shadow: 0 0 0 14px rgba(239, 68, 68, 0); }
 }
+.rh-tiles {
+  filter: brightness(0.55) saturate(0.6) contrast(1.05);
+}
 .leaflet-container {
   background: #0b1220;
   font-family: var(--font-geist-sans), system-ui, sans-serif;

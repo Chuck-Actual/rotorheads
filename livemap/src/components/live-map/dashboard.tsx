@@ -70,7 +70,7 @@ export function Dashboard() {
   const isDemo = data?.source === "demo";
 
   return (
-    <div className="dark flex h-dvh flex-col bg-background text-foreground">
+    <div className="dark flex min-h-dvh flex-col bg-background text-foreground lg:h-dvh">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-3">
         <div className="mr-auto flex items-center gap-3">
           <div className="flex size-9 items-center justify-center rounded-md bg-sky-600 font-mono text-sm font-black tracking-tighter text-white">
@@ -125,11 +125,11 @@ export function Dashboard() {
         </Button>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
+      <main className="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
         <div className="relative h-[55dvh] min-h-[320px] lg:order-2 lg:h-auto lg:flex-1">
           {s ? <MapView snapshot={s} layers={layers} focus={focus} /> : <MapPlaceholder />}
         </div>
-        <aside className="flex min-h-0 flex-1 flex-col border-t border-border lg:order-1 lg:w-[380px] lg:flex-none lg:border-r lg:border-t-0">
+        <aside className="flex flex-1 flex-col border-t lg:min-h-0 border-border lg:order-1 lg:w-[380px] lg:flex-none lg:border-r lg:border-t-0">
           {error && (
             <Alert variant="destructive" className="m-3 mb-0 w-auto">
               <AlertTriangle />
