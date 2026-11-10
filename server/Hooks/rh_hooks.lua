@@ -65,11 +65,10 @@ function RHHook.onSimulationFrame()
 
   -- Restart early when nobody has been flying for a while, so the next player gets a full session.
   local flying = 0
+  -- The host counts too: a dedicated server always sits in spectators, a game client hosting may be flying.
   for _, id in ipairs(net.get_player_list()) do
-    if id ~= net.get_server_id() then
-      local side = net.get_player_info(id, "side")
-      if side and side ~= 0 then flying = flying + 1 end
-    end
+    local side = net.get_player_info(id, "side")
+    if side and side ~= 0 then flying = flying + 1 end
   end
   if flying == 0 then
     RHHook.emptySince = RHHook.emptySince or now
