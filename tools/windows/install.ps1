@@ -119,14 +119,23 @@ $ms = if ($dcs) { Join-Path $dcs "Scripts\MissionScripting.lua" } else { $null }
 if ($ms) {
   Step "MissionScripting.lua: $ms"
   $text = [IO.File]::ReadAllText($ms)
-  $pattern = "(?m)^(\s*)(sanitizeModule\('(os|io|lfs)'\))"
+  # Single quotes: the replacement must stay literal. In double quotes PowerShell treats $1 as a variable.
+  $pattern = '(?m)^(\s*)(sanitizeModule\(''(os|io|lfs)''\))'
   if ($Desanitize) {
     if ($text -match $pattern) {
       $backup = "$ms.rh-backup"
       try {
         if (-not (Test-Path $backup)) { Copy-Item $ms $backup }
-        [IO.File]::WriteAllText($ms, ([regex]::Replace($text, $pattern, '$1--$2')), $utf8)
-        Ok "Commented out sanitizeModule for os, io and lfs (backup: $backup)"
+        $edited = [regex]::Replace($text, $pattern, '$1--$2')
+        # A safety check: the edit must change exactly the three expected lines and nothing else.
+        $diff = Compare-Object ($text -split "`n") ($edited -split "`n")
+        if (($diff | Where-Object { $_.SideIndicator -eq '=>' }).Count -ne 3) {
+          Warn "MissionScripting.lua does not look like the standard DCS file, so it was left untouched."
+          Warn "Back up $ms, then comment out the three lines sanitizeModule('os'), sanitizeModule('io') and sanitizeModule('lfs') by hand."
+        } else {
+          [IO.File]::WriteAllText($ms, $edited, $utf8)
+          Ok "Commented out sanitizeModule for os, io and lfs (backup: $backup)"
+        }
       } catch {
         Warn "Could not edit it: $($_.Exception.Message)"
         Warn "Re-run this script from an Administrator PowerShell."
