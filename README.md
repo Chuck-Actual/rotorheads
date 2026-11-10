@@ -55,6 +55,11 @@ To show your own server, either:
   `LIVEMAP_URL=https://your-map LIVEMAP_INGEST_TOKEN=<same secret> node livemap/scripts/push-state.mjs <path to livemap.json>`.
   Pushed state is kept in memory, so use one long-running server instance.
 
+## Test it in your own DCS first
+
+Follow [docs/LOCAL_TESTING.md](docs/LOCAL_TESTING.md): run `tools\windows\install.ps1`, build a small test
+mission, host it from your game and work through the checklist.
+
 ## Set up the DCS server
 
 You need a Windows machine with the DCS World dedicated server, the Syria map (or any other map), and
@@ -69,8 +74,8 @@ optionally [SRS](http://dcssimpleradio.com/) for radios.
    ```
    This lets mission scripts write files, so only run missions you trust. DCS updates overwrite this file, so
    redo it after every update.
-2. **Install the hook.** Copy `server/Hooks/rh_hooks.lua` to
-   `Saved Games\DCS.dcs_serverrelease\Scripts\Hooks\`. Add your UCID to `admins` if you want `-save`.
+2. **Install the scripts and hook.** Run `tools\windows\install.ps1 -Server -Desanitize` from an Administrator
+   PowerShell (it also does step 1). Add your UCID to `admins` in `rh_hooks.lua` if you want `-save`.
 3. **Build the mission.** Follow [docs/MISSION_EDITOR.md](docs/MISSION_EDITOR.md): load `Moose_.lua` and
    `mission/dist/rotorheads.lua` with triggers, then place the named zones, statics and template groups.
 4. **Configure the server.** Use `server/serverSettings.example.lua` as

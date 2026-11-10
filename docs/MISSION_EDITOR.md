@@ -8,16 +8,20 @@ The examples use the **Syria** map (Latakia → Aleppo front, as on Rotorheads),
 
 ## 1. Load the scripts
 
-Create three triggers:
+Run `tools\windows\install.ps1` first (see [LOCAL_TESTING.md](LOCAL_TESTING.md)). It puts `Moose_.lua` and
+`rotorheads.lua` in `Saved Games\DCS\Missions\Rotorheads\`. Then create two triggers that load them from disk:
 
 | Trigger | Type | Condition | Action |
 | --- | --- | --- | --- |
-| `Load MOOSE` | MISSION START | (none) | DO SCRIPT FILE → `Moose_.lua` |
-| `Config` *(optional)* | ONCE | TIME MORE (1) | DO SCRIPT → `RH_CONFIG_OVERRIDES = { restartHours = 4 }` |
-| `Load Rotorheads` | ONCE | TIME MORE (2) | DO SCRIPT FILE → `mission/dist/rotorheads.lua` |
+| `Load MOOSE` | MISSION START | (none) | DO SCRIPT → `dofile(lfs.writedir() .. [[Missions\Rotorheads\Moose_.lua]])` |
+| `Load Rotorheads` | ONCE | TIME MORE (2) | DO SCRIPT → `dofile(lfs.writedir() .. [[Missions\Rotorheads\rotorheads.lua]])` |
 
-Download `Moose_.lua` (the static build) from the [MOOSE releases page](https://github.com/FlightControl-Master/MOOSE/releases).
-After editing any script you must re-pick the file in the trigger (the Mission Editor embeds a copy in the .miz).
+To change settings without rebuilding, put `RH_CONFIG_OVERRIDES = { ... }` above the `dofile` line in the second
+trigger (any key from `mission/src/rh/config.lua`).
+
+Loading from disk needs the desanitized `MissionScripting.lua` (which the campaign needs anyway to save) and
+means script updates apply on the next mission start. If you would rather embed the scripts in the `.miz`, use
+DO SCRIPT FILE with the same two files instead, and re-pick them after every update.
 
 ## 2. Trigger zones
 
