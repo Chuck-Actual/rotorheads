@@ -2884,7 +2884,8 @@ end
 
 function RH.start()
   util.log("starting %s", RH.config.campaignName)
-  math.randomseed(RH.dcs.wallclock())
+  -- math.randomseed is removed by DCS's MissionScripting.lua, and math.random works without it.
+  if math.randomseed then math.randomseed(RH.dcs.wallclock()) end
   if not RH.dcs.filesEnabled() then
     util.log("io/lfs/os are sanitized: running WITHOUT saving. Edit Scripts\\MissionScripting.lua (see README).")
     RH.dcs.message("all", "ROTORHEADS WARNING: MissionScripting.lua is not desanitized, so the campaign will NOT be saved. See README step 1.", 60)
