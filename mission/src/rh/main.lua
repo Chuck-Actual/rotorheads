@@ -40,7 +40,11 @@ end
 
 function RH.start()
   util.log("starting %s", RH.config.campaignName)
-  math.randomseed(os.time())
+  math.randomseed(RH.dcs.wallclock())
+  if not RH.dcs.filesEnabled() then
+    util.log("io/lfs/os are sanitized: running WITHOUT saving. Edit Scripts\\MissionScripting.lua (see README).")
+    RH.dcs.message("all", "ROTORHEADS WARNING: MissionScripting.lua is not desanitized, so the campaign will NOT be saved. See README step 1.", 60)
+  end
   RH.persistence.load()
   RH.events.install()
 

@@ -16,6 +16,7 @@ function fake.new()
   function dcs.now() return w.t end
   function dcs.absTime() return 8 * 3600 + w.t end
   function dcs.wallclock() return w.wall end
+  function dcs.filesEnabled() return true end
   function dcs.theatre() return "Syria" end
   function dcs.schedule(fn, delay) table.insert(w.jobs, { at = w.t + delay, fn = fn }) end
   function dcs.installEventHandler() end

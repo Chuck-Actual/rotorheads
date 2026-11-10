@@ -52,7 +52,7 @@ function ctld.create()
   inst.allowcratepickupagain = true
   inst.TroopUnloadDistGroundHook = 15
 
-  inst.enableLoadSave = true
+  inst.enableLoadSave = RH.dcs.filesEnabled()
   inst.saveinterval = c.saveInterval
   inst.filepath = RH.dcs.saveDir()
   inst.filename = "ctld.csv"
@@ -82,7 +82,7 @@ function ctld.create()
   for _, farp in ipairs(RH.logistics.farps()) do ctld.addFarpZone(farp) end
   ctld.installHooks(inst)
   inst:__Start(2)
-  inst:__Load(10)
+  if inst.enableLoadSave then inst:__Load(10) end
   return inst
 end
 

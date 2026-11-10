@@ -535,7 +535,11 @@ end
 
 function dcs.now() return timer.getTime() end
 function dcs.absTime() return timer.getAbsTime() end
-function dcs.wallclock() return os.time() end
+function dcs.filesEnabled() return io ~= nil and lfs ~= nil and os ~= nil end
+function dcs.wallclock()
+  if os then return os.time() end
+  return math.floor(timer.getAbsTime())
+end
 function dcs.theatre() return env.mission and env.mission.theatre or "Unknown" end
 
 function dcs.schedule(fn, delay)
@@ -546,16 +550,20 @@ function dcs.schedule(fn, delay)
 end
 
 function dcs.saveDir()
+  if not dcs.filesEnabled() then return nil end
   local dir = lfs.writedir() .. RH.config.saveFolder
   lfs.mkdir(dir)
   return dir
 end
 
 function dcs.savePath(file)
-  return dcs.saveDir() .. "\\" .. file
+  local dir = dcs.saveDir()
+  if not dir then return nil end
+  return dir .. "\\" .. file
 end
 
 function dcs.readFile(path)
+  if not path or not io then return nil end
   local f = io.open(path, "r")
   if not f then return nil end
   local s = f:read("*a")
@@ -564,6 +572,7 @@ function dcs.readFile(path)
 end
 
 function dcs.writeFile(path, contents)
+  if not path or not io then return false end
   local tmp = path .. ".tmp"
   local f = io.open(tmp, "w")
   if not f then return false end
@@ -574,7 +583,9 @@ function dcs.writeFile(path, contents)
 end
 
 function dcs.notify(kind, data)
-  local f = io.open(dcs.savePath("events.jsonl"), "a")
+  local path = dcs.savePath("events.jsonl")
+  if not path then return end
+  local f = io.open(path, "a")
   if not f then return end
   f:write(util.toJSON({ t = os.time(), kind = kind, data = data }), "\n")
   f:close()
@@ -2468,7 +2479,7 @@ function ctld.create()
   inst.allowcratepickupagain = true
   inst.TroopUnloadDistGroundHook = 15
 
-  inst.enableLoadSave = true
+  inst.enableLoadSave = RH.dcs.filesEnabled()
   inst.saveinterval = c.saveInterval
   inst.filepath = RH.dcs.saveDir()
   inst.filename = "ctld.csv"
@@ -2498,7 +2509,7 @@ function ctld.create()
   for _, farp in ipairs(RH.logistics.farps()) do ctld.addFarpZone(farp) end
   ctld.installHooks(inst)
   inst:__Start(2)
-  inst:__Load(10)
+  if inst.enableLoadSave then inst:__Load(10) end
   return inst
 end
 
@@ -2627,7 +2638,7 @@ function csar.create()
   inst.csarOncrash = true
   inst.autosmoke = false
   inst.EnableMenuSmokeMASH = true
-  inst.enableLoadSave = true
+  inst.enableLoadSave = RH.dcs.filesEnabled()
   inst.saveinterval = RH.config.saveInterval
   inst.filepath = RH.dcs.saveDir()
   inst.filename = "csar.csv"
@@ -2639,7 +2650,7 @@ function csar.create()
   csar.instance = inst
   csar.installHooks(inst)
   inst:__Start(2)
-  inst:__Load(10)
+  if inst.enableLoadSave then inst:__Load(10) end
   return inst
 end
 
@@ -2803,7 +2814,11 @@ end
 
 function RH.start()
   util.log("starting %s", RH.config.campaignName)
-  math.randomseed(os.time())
+  math.randomseed(RH.dcs.wallclock())
+  if not RH.dcs.filesEnabled() then
+    util.log("io/lfs/os are sanitized: running WITHOUT saving. Edit Scripts\\MissionScripting.lua (see README).")
+    RH.dcs.message("all", "ROTORHEADS WARNING: MissionScripting.lua is not desanitized, so the campaign will NOT be saved. See README step 1.", 60)
+  end
   RH.persistence.load()
   RH.events.install()
 

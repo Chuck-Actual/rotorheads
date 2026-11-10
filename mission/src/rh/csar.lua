@@ -35,7 +35,7 @@ function csar.create()
   inst.csarOncrash = true
   inst.autosmoke = false
   inst.EnableMenuSmokeMASH = true
-  inst.enableLoadSave = true
+  inst.enableLoadSave = RH.dcs.filesEnabled()
   inst.saveinterval = RH.config.saveInterval
   inst.filepath = RH.dcs.saveDir()
   inst.filename = "csar.csv"
@@ -47,7 +47,7 @@ function csar.create()
   csar.instance = inst
   csar.installHooks(inst)
   inst:__Start(2)
-  inst:__Load(10)
+  if inst.enableLoadSave then inst:__Load(10) end
   return inst
 end
 
