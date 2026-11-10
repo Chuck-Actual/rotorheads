@@ -23,13 +23,24 @@ for _, name in ipairs(MODULES) do
   local src = read("src/rh/" .. name .. ".lua")
   local chunk, err = loadstring(src, name)
   if not chunk then error("syntax error in " .. name .. ": " .. err) end
+  -- Each module loads inside its own protected call, so a failure names the module and the
+  -- error in dcs.log and on screen instead of dying silently.
   table.insert(parts, "-- ===== " .. name .. ".lua =====")
-  table.insert(parts, "do")
+  table.insert(parts, "do local __ok, __err = pcall(function()")
   table.insert(parts, src)
-  table.insert(parts, "end")
+  table.insert(parts, "end)")
+  table.insert(parts, "if not __ok then")
+  table.insert(parts, '  env.error("[RH] failed while loading ' .. name .. '.lua: " .. tostring(__err))')
+  table.insert(parts, '  trigger.action.outText("ROTORHEADS failed while loading ' .. name .. '.lua: " .. tostring(__err), 60)')
+  table.insert(parts, "  return")
+  table.insert(parts, "end end")
 end
 table.insert(parts, "")
-table.insert(parts, "RH.start()")
+table.insert(parts, "do local __ok, __err = pcall(RH.start)")
+table.insert(parts, "if not __ok then")
+table.insert(parts, '  env.error("[RH] failed during start: " .. tostring(__err))')
+table.insert(parts, '  trigger.action.outText("ROTORHEADS failed during start: " .. tostring(__err), 60)')
+table.insert(parts, "end end")
 
 os.execute("mkdir -p dist 2>/dev/null || mkdir dist")
 local out = assert(io.open("dist/rotorheads.lua", "w"))

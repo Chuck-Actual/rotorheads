@@ -2,7 +2,7 @@
 -- Requires MOOSE to be loaded first and io/lfs/os de-sanitized in Scripts/MissionScripting.lua.
 
 -- ===== util.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = {}
@@ -181,9 +181,14 @@ end
 
 return util
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading util.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading util.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== config.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 -- Every tunable number in the campaign lives here. Values follow the Rotorheads wiki where it gives one.
@@ -409,9 +414,14 @@ if type(RH_CONFIG_OVERRIDES) == "table" then merge(RH.config, RH_CONFIG_OVERRIDE
 
 return RH.config
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading config.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading config.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== core.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -511,9 +521,14 @@ end
 
 return RH
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading core.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading core.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== dcs.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -1057,9 +1072,14 @@ end
 
 return dcs
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading dcs.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading dcs.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== logistics.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -1359,9 +1379,14 @@ end
 
 return logistics
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading logistics.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading logistics.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== outposts.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -1526,9 +1551,14 @@ end
 
 return outposts
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading outposts.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading outposts.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== factories.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -1772,9 +1802,14 @@ end
 
 return factories
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading factories.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading factories.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== redair.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -1887,9 +1922,14 @@ end
 
 return redair
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading redair.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading redair.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== lives.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -2048,9 +2088,14 @@ end
 
 return lives
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading lives.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading lives.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== markers.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -2152,9 +2197,14 @@ end
 
 return markers
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading markers.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading markers.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== convoy.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -2307,9 +2357,14 @@ end
 
 return convoy
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading convoy.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading convoy.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== livemap.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -2422,9 +2477,14 @@ end
 
 return livemap
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading livemap.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading livemap.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== ctld.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -2598,9 +2658,14 @@ end
 
 return ctld
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading ctld.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading ctld.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== csar.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -2769,9 +2834,14 @@ end
 
 return csar
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading csar.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading csar.lua: " .. tostring(__err), 60)
+  return
+end end
 -- ===== main.lua =====
-do
+do local __ok, __err = pcall(function()
 RH = RH or {}
 
 local util = RH.util
@@ -2841,6 +2911,15 @@ end
 
 return RH
 
-end
+end)
+if not __ok then
+  env.error("[RH] failed while loading main.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading main.lua: " .. tostring(__err), 60)
+  return
+end end
 
-RH.start()
+do local __ok, __err = pcall(RH.start)
+if not __ok then
+  env.error("[RH] failed during start: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed during start: " .. tostring(__err), 60)
+end end
