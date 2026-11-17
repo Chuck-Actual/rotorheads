@@ -133,7 +133,7 @@ Do these in order. Stop at the first one that fails and send me what happened (s
 | 2 | Look in `Saved Games\DCS\rotorheads\` | `campaign.lua` and `livemap.json` exist. |
 | 3 | Chat `-help`, `-time`, `-lives`, `-farps` | Replies in chat. `-farps` lists the Bassel zone marked **(LC)** with unlimited crates. |
 | 4 | F10 map → Other → **CTLD** → Manage Troops | Load **Standard (6)** while on the apron, take off, land, unload. Blue infantry appears. |
-| 5 | CTLD → Manage Crates → **Humvee TOW** → **1**. That loads four small CDS crates (one vehicle). Fly at least 300 m off the apron, drop them, then Manage Crates → Build while the four crates are within 50 m of each other | A TOW HMMWV is built where the crates were. |
+| 5 | In a Chinook (6 internal crates): CTLD → Manage Crates → **Humvee TOW** → **1**. That loads four small CDS crates. Fly at least 300 m off the apron, drop them, then Manage Crates → Build while the four are within 50 m | A TOW HMMWV is built where the crates were. |
 | 6 | Place an F10 map marker with the text `-smoke,green` near you (within 15 km) | Green smoke appears at the marker. |
 | 7 | Fly towards the factory | At 5 km it is revealed on the F10 map. Red convoys drive from the factory to the AO. |
 | 8 | Destroy the three outpost containers (any attack helo) | A yellow zone appears and a Mi-28 launches from `RH_REDHELI_East`. |

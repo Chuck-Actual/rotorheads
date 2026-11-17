@@ -349,7 +349,7 @@ RH.config = {
   },
 
   -- Vehicle crates. `crates` is how many small CDS crates must sit within 50 m before Build works.
-  -- `mass` is kg per crate. A Humvee is four crates so a UH-1H can lift a whole vehicle in one trip.
+  -- `mass` is kg per crate. A Humvee is four crates. A Chinook (6 internal) can lift one in a single trip.
   vehicles = {
     { name = "Humvee (JTAC)", template = "RH_TPL_BLUE_HMMWV_JTAC", crates = 4, mass = 300, subcat = "Recon" },
     { name = "Humvee TOW", template = "RH_TPL_BLUE_HMMWV_TOW", crates = 4, mass = 300, subcat = "Anti-Tank" },
@@ -379,14 +379,16 @@ RH.config = {
     uhRepair = { name = "UH Repair kit", template = "RH_TPL_BLUE_UHREPAIR_KIT", crates = 1, mass = 300, lifetime = 1800 },
   },
 
-  -- Troops weigh 100 kg each (wiki). Capacities from the wiki's transport-limits table.
+  -- Troops weigh 100 kg each (wiki). Internal crate counts are the wiki "Carry Capacity" table.
+  -- Only small crates load internally. A Humvee is 4 crates, so a Chinook (6) can haul one in a single trip.
+  -- Huey and Black Hawk hold 1, the Hip holds 2, the Hind holds 1. Sling load is a separate single crate.
   troopWeight = 100,
   airframes = {
-    ["Mi-8MTV2"] = { crates = true, troops = true, cratelimit = 4, trooplimit = 12, length = 15, maxweight = 4000, csar = 12 },
-    ["Mi-8MT"] = { crates = true, troops = true, cratelimit = 4, trooplimit = 12, length = 15, maxweight = 4000, csar = 12 },
+    ["Mi-8MTV2"] = { crates = true, troops = true, cratelimit = 2, trooplimit = 12, length = 15, maxweight = 4000, csar = 12 },
+    ["Mi-8MT"] = { crates = true, troops = true, cratelimit = 2, trooplimit = 12, length = 15, maxweight = 4000, csar = 12 },
     ["Mi-24P"] = { crates = true, troops = true, cratelimit = 1, trooplimit = 6, length = 18, maxweight = 1500, csar = 6 },
-    ["UH-1H"] = { crates = true, troops = true, cratelimit = 4, trooplimit = 6, length = 15, maxweight = 1200, csar = 6 },
-    ["UH-60L"] = { crates = true, troops = true, cratelimit = 4, trooplimit = 10, length = 16, maxweight = 3500, csar = 10 },
+    ["UH-1H"] = { crates = true, troops = true, cratelimit = 1, trooplimit = 6, length = 15, maxweight = 1200, csar = 6 },
+    ["UH-60L"] = { crates = true, troops = true, cratelimit = 1, trooplimit = 10, length = 16, maxweight = 3500, csar = 10 },
     ["CH-47Fbl1"] = { crates = true, troops = true, cratelimit = 6, trooplimit = 15, length = 20, maxweight = 10000, csar = 20 },
     ["SA342M"] = { crates = false, troops = true, cratelimit = 0, trooplimit = 2, length = 12, maxweight = 400, csar = 2 },
     ["SA342L"] = { crates = false, troops = true, cratelimit = 0, trooplimit = 2, length = 12, maxweight = 400, csar = 2 },
