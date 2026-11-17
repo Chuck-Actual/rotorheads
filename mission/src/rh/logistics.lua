@@ -222,7 +222,8 @@ function logistics.spawnBuilt()
       farp.pending = false
       farp.built = true
       RH.dcs.removeDrawing("pending-" .. farp.name)
-      RH.dcs.message("blue", farp.name .. " is up. Dynamic spawn, no fuel or ammo yet.", 25)
+      local stock = logistics.hasWarehouseStock(farp) and "Fuel and ammo restored from the save." or "No fuel or ammo yet."
+      RH.dcs.message("blue", farp.name .. " is up. Dynamic spawn. " .. stock, 25)
     else
       util.log("spawn %s failed: %s", farp.name, tostring(err))
       RH.dcs.message("blue", string.format("%s is in the save but did not spawn: %s", farp.name, tostring(err)), 30)
@@ -238,12 +239,25 @@ function logistics.captureStocks()
   end
 end
 
+function logistics.hasWarehouseStock(farp)
+  for _, n in pairs(farp.liquids or {}) do
+    if type(n) == "number" and n > 0 then return true end
+  end
+  for _, n in pairs(farp.ammoItems or {}) do
+    if type(n) == "number" and n > 0 then return true end
+  end
+  return false
+end
+
 function logistics.stockText(farp)
   if farp.pending then return "marked, builds on next restart with no fuel or ammo" end
   if not farp.built then
     return (logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)) .. " crates"
   end
-  local fuel = farp.liquids and farp.liquids.JETFUEL or 0
+  local fuel = 0
+  for _, n in pairs(farp.liquids or {}) do
+    if type(n) == "number" and n > fuel then fuel = n end
+  end
   local ammo = 0
   for _, n in pairs(farp.ammoItems or {}) do ammo = ammo + n end
   return string.format("fuel %d, ammo %d", fuel, ammo)
@@ -398,6 +412,10 @@ function logistics.start()
     RH.dcs.spawnMash(name, m)
   end
   logistics.spawnBuilt()
+  -- Fuel and ammo change while people are flying. Write them down often, not only every five minutes.
+  RH.every(30, function()
+    if RH.persistence and RH.persistence.save then RH.persistence.save() end
+  end)
   for name, bo in pairs(RH.state.blueOutposts) do
     RH.dcs.drawCircle("blueoutpost-" .. name, "blue", bo, bo.radius, { 0, 0.4, 1, 1 }, { 0, 0.4, 1, 0.08 }, name)
   end

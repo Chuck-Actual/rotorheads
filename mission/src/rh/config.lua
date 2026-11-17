@@ -107,9 +107,9 @@ RH.config = {
     -- Crates and troops load within this distance of the logistics tent.
     loadRadius = 150,
     displayCirclesFor = 60,
-    -- How many of each helicopter the warehouse starts with. Dynamic spawn stays grey at zero.
-    -- Fuel and weapons stay empty until they are hauled in.
-    airframes = 4,
+    -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
+    -- Fuel and weapons are not restocked. Those stay at whatever was hauled in.
+    airframes = 999,
     -- The pad is the heliport. The Humvee is the ground crew. The depot, ammo dump, and tent
     -- are the fuel, ordnance, and repair points. Refuel only works while sitting on the pad.
     services = {

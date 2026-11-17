@@ -298,9 +298,9 @@ RH.config = {
     -- Crates and troops load within this distance of the logistics tent.
     loadRadius = 150,
     displayCirclesFor = 60,
-    -- How many of each helicopter the warehouse starts with. Dynamic spawn stays grey at zero.
-    -- Fuel and weapons stay empty until they are hauled in.
-    airframes = 4,
+    -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
+    -- Fuel and weapons are not restocked. Those stay at whatever was hauled in.
+    airframes = 999,
     -- The pad is the heliport. The Humvee is the ground crew. The depot, ammo dump, and tent
     -- are the fuel, ordnance, and repair points. Refuel only works while sitting on the pad.
     services = {
@@ -1182,59 +1182,56 @@ function dcs.spawnFarp(farp)
     end)
     if not ok then util.log("FARP piece %s failed: %s", objectName, tostring(err)) end
   end
-  if not STORAGE or not STORAGE.New then return end
-  local ok, wh = pcall(STORAGE.New, STORAGE, farp.name)
-  if not ok or not wh then return end
+  local function fill()
+    local warehouse = dcs.farpWarehouse(farp.name)
+    if warehouse then dcs.applyWarehouse(farp, warehouse) end
+  end
+  fill()
+  -- The airbase sometimes appears a moment after the pad is created.
+  if RH.after then RH.after(2, fill) end
+end
+
+function dcs.farpWarehouse(name)
+  if not Airbase or not Airbase.getByName then return nil end
+  local ok, ab = pcall(Airbase.getByName, name)
+  if not ok or not ab or not ab.getWarehouse then return nil end
+  local okWh, wh = pcall(function() return ab:getWarehouse() end)
+  if not okWh then return nil end
+  return wh
+end
+
+function dcs.applyWarehouse(farp, wh)
   for key, amount in pairs(farp.liquids or {}) do
-    local id = STORAGE.Liquid and STORAGE.Liquid[key]
-    if id and type(amount) == "number" and amount > 0 and wh.SetLiquid then wh:SetLiquid(id, amount) end
-  end
-  for item, amount in pairs(farp.ammoItems or {}) do
-    if type(amount) == "number" and amount > 0 and wh.SetItem then wh:SetItem(item, amount) end
-  end
-  if not farp.airframes then
-    farp.airframes = {}
-    for typeName in pairs(RH.config.airframes) do
-      farp.airframes[typeName] = RH.config.farp.airframes or 4
+    if type(amount) == "number" and amount > 0 then
+      local id = type(key) == "number" and key or tonumber(key)
+      if id == nil and STORAGE and STORAGE.Liquid then id = STORAGE.Liquid[key] end
+      if id ~= nil then pcall(function() wh:setLiquidAmount(id, amount) end) end
     end
   end
-  for typeName, amount in pairs(farp.airframes) do
-    if type(amount) == "number" and amount > 0 and wh.SetItem then wh:SetItem(typeName, amount) end
+  for item, amount in pairs(farp.ammoItems or {}) do
+    if type(item) == "string" and type(amount) == "number" and amount > 0 then
+      pcall(function() wh:setItem(item, amount) end)
+    end
+  end
+  dcs.topUpAirframes(wh)
+end
+
+function dcs.topUpAirframes(wh)
+  local stock = RH.config.farp.airframes or 999
+  for typeName in pairs(RH.config.airframes or {}) do
+    pcall(function() wh:setItem(typeName, stock) end)
   end
 end
 
--- Read the live warehouse so the next restart spawns the same fuel and ammo.
+-- Read the live warehouse. A failed read leaves the last saved fuel and ammo alone.
 function dcs.captureFarpStock(farp)
-  if not STORAGE or not STORAGE.New then return false end
-  local ok, wh = pcall(STORAGE.New, STORAGE, farp.name)
-  if not ok or not wh or not wh.GetLiquidAmount then return false end
-  local liquids = {}
-  for key, id in pairs(STORAGE.Liquid or {}) do
-    local okN, n = pcall(function() return wh:GetLiquidAmount(id) end)
-    if okN and type(n) == "number" then liquids[key] = n end
-  end
-  if next(liquids) then farp.liquids = liquids end
-  local items = {}
-  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
-  if weapons and wh.GetItemAmount then
-    for _, group in pairs(weapons) do
-      if type(group) == "table" then
-        for _, item in pairs(group) do
-          if type(item) == "string" then
-            local okN, n = pcall(function() return wh:GetItemAmount(item) end)
-            if okN and type(n) == "number" and n > 0 then items[item] = n end
-          end
-        end
-      end
-    end
-  end
-  farp.ammoItems = items
-  local frames = {}
-  for typeName in pairs(RH.config.airframes or {}) do
-    local okN, n = pcall(function() return wh:GetItemAmount(typeName) end)
-    if okN and type(n) == "number" then frames[typeName] = n end
-  end
-  if next(frames) then farp.airframes = frames end
+  local wh = dcs.farpWarehouse(farp.name)
+  if not wh or not wh.getInventory then return false end
+  local ok, inv = pcall(function() return wh:getInventory() end)
+  if not ok or type(inv) ~= "table" then return false end
+  farp.liquids = inv.liquids or {}
+  farp.ammoItems = inv.weapon or inv.weapons or {}
+  dcs.topUpAirframes(wh)
   return true
 end
 
@@ -1479,7 +1476,8 @@ function logistics.spawnBuilt()
       farp.pending = false
       farp.built = true
       RH.dcs.removeDrawing("pending-" .. farp.name)
-      RH.dcs.message("blue", farp.name .. " is up. Dynamic spawn, no fuel or ammo yet.", 25)
+      local stock = logistics.hasWarehouseStock(farp) and "Fuel and ammo restored from the save." or "No fuel or ammo yet."
+      RH.dcs.message("blue", farp.name .. " is up. Dynamic spawn. " .. stock, 25)
     else
       util.log("spawn %s failed: %s", farp.name, tostring(err))
       RH.dcs.message("blue", string.format("%s is in the save but did not spawn: %s", farp.name, tostring(err)), 30)
@@ -1495,12 +1493,25 @@ function logistics.captureStocks()
   end
 end
 
+function logistics.hasWarehouseStock(farp)
+  for _, n in pairs(farp.liquids or {}) do
+    if type(n) == "number" and n > 0 then return true end
+  end
+  for _, n in pairs(farp.ammoItems or {}) do
+    if type(n) == "number" and n > 0 then return true end
+  end
+  return false
+end
+
 function logistics.stockText(farp)
   if farp.pending then return "marked, builds on next restart with no fuel or ammo" end
   if not farp.built then
     return (logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)) .. " crates"
   end
-  local fuel = farp.liquids and farp.liquids.JETFUEL or 0
+  local fuel = 0
+  for _, n in pairs(farp.liquids or {}) do
+    if type(n) == "number" and n > fuel then fuel = n end
+  end
   local ammo = 0
   for _, n in pairs(farp.ammoItems or {}) do ammo = ammo + n end
   return string.format("fuel %d, ammo %d", fuel, ammo)
@@ -1655,6 +1666,10 @@ function logistics.start()
     RH.dcs.spawnMash(name, m)
   end
   logistics.spawnBuilt()
+  -- Fuel and ammo change while people are flying. Write them down often, not only every five minutes.
+  RH.every(30, function()
+    if RH.persistence and RH.persistence.save then RH.persistence.save() end
+  end)
   for name, bo in pairs(RH.state.blueOutposts) do
     RH.dcs.drawCircle("blueoutpost-" .. name, "blue", bo, bo.radius, { 0, 0.4, 1, 1 }, { 0, 0.4, 1, 0.08 }, name)
   end
