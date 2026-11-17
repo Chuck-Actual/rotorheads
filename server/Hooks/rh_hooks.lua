@@ -49,8 +49,16 @@ end
 local function missionString(code)
   local results = { pcall(net.dostring_in, "mission", code) }
   if not results[1] then return nil, tostring(results[2]) end
-  if type(results[2]) == "string" then return results[2] end
-  if type(results[3]) == "string" then return results[3] end
+  local first, second = results[2], results[3]
+  -- DCS returns either a string, or (true, string), or (false, error text).
+  if type(first) == "boolean" then
+    if first and type(second) == "string" then return second end
+    return nil, tostring(second or "mission call failed")
+  end
+  if type(first) == "string" then
+    if first:sub(1, 8) == "[string " then return nil, first end
+    return first
+  end
   return nil, "mission returned nothing"
 end
 
@@ -147,9 +155,13 @@ local function writeNote(source, text)
 end
 
 local function pullWorld()
+  local probe, probeErr = missionString("return (RH.world and RH.world.cachePayload) and 'ready' or 'old-script'")
+  if probe ~= "ready" then
+    return nil, "rotorheads.lua in Missions\\Rotorheads is the old file, so the server cannot read the units. Replace it and restart the mission. The current file is about 5815 lines. The new one is about 4444 lines. (" .. tostring(probe or probeErr) .. ")"
+  end
   local countText, err = missionString("return tostring(RH.world.cachePayload())")
   if not countText then return nil, err end
-  local count = tonumber(countText:match("%d+"))
+  local count = tonumber(countText:match("^%s*(%d+)%s*$"))
   if not count then return nil, "mission answered: " .. countText end
   if count > 2000000 then return nil, "world save is too large" end
   local size = 4000
@@ -177,6 +189,10 @@ local function exportEditor()
   local worldText, worldErr = pullWorld()
   if not worldText then
     writeNote(source, "Editor mission was not built.\r\nThe mission script did not answer: " .. tostring(worldErr))
+    if not RHHook.toldFail then
+      RHHook.toldFail = true
+      net.send_chat("Rotorheads did not save the editor mission. " .. tostring(worldErr), true)
+    end
     return
   end
   if worldText:sub(1, 6) == "error:" then
