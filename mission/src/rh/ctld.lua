@@ -51,6 +51,8 @@ function ctld.create()
   inst.usesubcats = true
   inst.allowcratepickupagain = true
   inst.TroopUnloadDistGroundHook = 15
+  -- Small CDS boxes (C-130J mod) rather than the big container_cargo static.
+  inst.basetype = "cds_crate"
 
   inst.enableLoadSave = RH.dcs.filesEnabled()
   inst.saveinterval = c.saveInterval

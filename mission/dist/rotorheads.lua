@@ -348,10 +348,11 @@ RH.config = {
     { name = "Special Ops (4)", template = "RH_TPL_BLUE_INF_SOF_4", size = 4, subcat = "Special Ops" },
   },
 
-  -- Vehicle crates. `crates` is how many must be gathered within 50 m and unpacked; `mass` is kg per crate.
+  -- Vehicle crates. `crates` is how many small CDS crates must sit within 50 m before Build works.
+  -- `mass` is kg per crate. A Humvee is four crates so a UH-1H can lift a whole vehicle in one trip.
   vehicles = {
-    { name = "Humvee (JTAC)", template = "RH_TPL_BLUE_HMMWV_JTAC", crates = 1, mass = 1000, subcat = "Recon" },
-    { name = "Humvee TOW", template = "RH_TPL_BLUE_HMMWV_TOW", crates = 1, mass = 1200, subcat = "Anti-Tank" },
+    { name = "Humvee (JTAC)", template = "RH_TPL_BLUE_HMMWV_JTAC", crates = 4, mass = 300, subcat = "Recon" },
+    { name = "Humvee TOW", template = "RH_TPL_BLUE_HMMWV_TOW", crates = 4, mass = 300, subcat = "Anti-Tank" },
     { name = "M1126 Stryker ICV", template = "RH_TPL_BLUE_STRYKER", crates = 2, mass = 1500, subcat = "Armor" },
     { name = "M1128 Stryker MGS", template = "RH_TPL_BLUE_STRYKER_MGS", crates = 3, mass = 1500, subcat = "Armor" },
     { name = "M2A2 Bradley", template = "RH_TPL_BLUE_BRADLEY", crates = 3, mass = 1500, subcat = "Armor" },
@@ -381,11 +382,11 @@ RH.config = {
   -- Troops weigh 100 kg each (wiki). Capacities from the wiki's transport-limits table.
   troopWeight = 100,
   airframes = {
-    ["Mi-8MTV2"] = { crates = true, troops = true, cratelimit = 2, trooplimit = 12, length = 15, maxweight = 4000, csar = 12 },
-    ["Mi-8MT"] = { crates = true, troops = true, cratelimit = 2, trooplimit = 12, length = 15, maxweight = 4000, csar = 12 },
+    ["Mi-8MTV2"] = { crates = true, troops = true, cratelimit = 4, trooplimit = 12, length = 15, maxweight = 4000, csar = 12 },
+    ["Mi-8MT"] = { crates = true, troops = true, cratelimit = 4, trooplimit = 12, length = 15, maxweight = 4000, csar = 12 },
     ["Mi-24P"] = { crates = true, troops = true, cratelimit = 1, trooplimit = 6, length = 18, maxweight = 1500, csar = 6 },
-    ["UH-1H"] = { crates = true, troops = true, cratelimit = 1, trooplimit = 6, length = 15, maxweight = 1200, csar = 6 },
-    ["UH-60L"] = { crates = true, troops = true, cratelimit = 1, trooplimit = 10, length = 16, maxweight = 3500, csar = 10 },
+    ["UH-1H"] = { crates = true, troops = true, cratelimit = 4, trooplimit = 6, length = 15, maxweight = 1200, csar = 6 },
+    ["UH-60L"] = { crates = true, troops = true, cratelimit = 4, trooplimit = 10, length = 16, maxweight = 3500, csar = 10 },
     ["CH-47Fbl1"] = { crates = true, troops = true, cratelimit = 6, trooplimit = 15, length = 20, maxweight = 10000, csar = 20 },
     ["SA342M"] = { crates = false, troops = true, cratelimit = 0, trooplimit = 2, length = 12, maxweight = 400, csar = 2 },
     ["SA342L"] = { crates = false, troops = true, cratelimit = 0, trooplimit = 2, length = 12, maxweight = 400, csar = 2 },
@@ -2538,6 +2539,8 @@ function ctld.create()
   inst.usesubcats = true
   inst.allowcratepickupagain = true
   inst.TroopUnloadDistGroundHook = 15
+  -- Small CDS boxes (C-130J mod) rather than the big container_cargo static.
+  inst.basetype = "cds_crate"
 
   inst.enableLoadSave = RH.dcs.filesEnabled()
   inst.saveinterval = c.saveInterval
