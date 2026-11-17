@@ -99,6 +99,8 @@ RH.config = {
     startingCrates = 40,
     maxCrates = 80,
     zoneRadius = 250,
+    -- Crates can only be picked up this close to the logistics tent, not anywhere in the big FARP zone.
+    loadRadius = 150,
     displayCirclesFor = 60,
   },
 
@@ -106,7 +108,10 @@ RH.config = {
     crates = 4,
     crateMass = 400,
     minSeparation = 16000,
-    capacity = 30,
+    -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
+    capacity = 9999,
+    -- Drop off rescued pilots within this distance of the hospital tent.
+    radius = 150,
   },
 
   markers = {

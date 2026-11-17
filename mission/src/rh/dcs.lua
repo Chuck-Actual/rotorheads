@@ -521,22 +521,10 @@ function dcs.spawnFarp(farp)
 end
 
 function dcs.spawnMash(name, point)
-  local tplName = "RH_TPL_BLUE_MASH"
-  local tpl = _DATABASE:GetGroupTemplate(tplName)
-  if not tpl then
-    util.log("missing template group %s; MASH %s has no building", tplName, name)
-    return
-  end
-  local g = UTILS.DeepCopy(tpl)
-  local p = util.toVec2(point)
-  local dx, dy = p.x - g.x, p.y - g.y
-  g.name, g.groupId, g.lateActivation, g.route = name, nil, false, nil
-  g.x, g.y = p.x, p.y
-  for i, u in ipairs(g.units) do
-    u.name, u.unitId = string.format("%s-%d", name, i), nil
-    u.x, u.y = u.x + dx, u.y + dy
-  end
-  coalition.addGroup(tpl.CountryID, Group.Category.GROUND, g)
+  local c = COORDINATE:NewFromVec2(util.toVec2(point))
+  local tent = SPAWNSTATIC:NewFromType("Tent04", "Fortifications", country.id.USA)
+  tent:InitShape("M92_Tent04")
+  tent:SpawnFromCoordinate(c, 0, name .. " tent")
 end
 
 return dcs

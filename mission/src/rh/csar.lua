@@ -22,11 +22,12 @@ function csar.create()
   local inst = CSAR:New(coalition.side.BLUE, "RH_TPL_DOWNED_PILOT", "RH CSAR")
   inst.useprefix = false
   inst.allowFARPRescue = true
-  inst.FARPRescueDistance = 500
   inst.mashprefix = { RH.config.prefixes.mash }
   inst.pilotRuntoExtractPoint = true
   inst.extractDistance = 500
-  inst.loadDistance = 75
+  -- The pilot has to reach the helicopter. Landing on top of him no longer skips the run.
+  inst.loadDistance = 30
+  inst.FARPRescueDistance = RH.config.mash.radius
   inst.immortalcrew = true
   inst.invisiblecrew = false
   inst.PilotWeight = RH.config.troopWeight
@@ -52,6 +53,55 @@ function csar.create()
 end
 
 function csar.installHooks(inst)
+  -- Run to the helicopter at a jog, and keep a countdown on screen until he climbs in.
+  -- MOOSE picks the pilot up immediately when you land within about 80 m, so this replaces that check.
+  local stockCheck = inst._CheckCloseWoundedGroup
+  function inst:_OrderGroupToMoveToPoint(leader, destination)
+    if not leader or not destination then return end
+    leader:SetAIOn()
+    leader:RouteToVec2(destination:GetVec2(), 8)
+  end
+  function inst:_CheckCloseWoundedGroup(distance, heliUnit, heliName, woundedGroup, woundedGroupName)
+    if heliUnit:InAir() then
+      return stockCheck(self, distance, heliUnit, heliName, woundedGroup, woundedGroupName)
+    end
+    if distance >= (self.extractDistance or 500) then return false end
+    local key = heliUnit:GetName() .. "_" .. woundedGroupName
+    local _, pilotable = self:_CheckNameInDownedPilots(woundedGroupName)
+    local pilotName = (pilotable and pilotable.desc) or "The pilot"
+    woundedGroup:OptionAlarmStateGreen()
+    self:_OrderGroupToMoveToPoint(woundedGroup, heliUnit:GetCoordinate())
+    local left = self.landedStatus[key]
+    if left == nil then
+      left = math.max(15, math.floor((distance - self.loadDistance) / 4))
+    else
+      left = left - 5
+    end
+    if left < 0 then left = 0 end
+    self.landedStatus[key] = left
+    if distance > self.loadDistance or left > 0 then
+      self:_DisplayMessageToSAR(heliUnit, string.format("%s is running to the helicopter. Boarding in %d seconds.", pilotName, left), 5, false)
+      return false
+    end
+    self.landedStatus[key] = nil
+    self:_PickupUnit(heliUnit, pilotName, woundedGroup, woundedGroupName)
+    return true
+  end
+
+  local addMenu = inst._AddMedevacMenuItem
+  csar.mapMenu = {}
+  function inst:_AddMedevacMenuItem(...)
+    addMenu(self, ...)
+    for _, group in pairs(self.allheligroupset:GetSetObjects() or {}) do
+      local name = group:GetName()
+      if self.addedTo[name] and not csar.mapMenu[name] then
+        csar.mapMenu[name] = true
+        local root = MENU_GROUP:New(group, "CSAR")
+        MENU_GROUP_COMMAND:New(group, "Show on map", root, csar.showOnMap)
+      end
+    end
+  end
+
   function inst:OnAfterBoarded(From, Event, To, Heliname, Woundedgroupname, Description)
     local rec = pilotRecord(Woundedgroupname)
     local player = rec and (rec.player or rec.desc) or Description
@@ -63,7 +113,7 @@ function csar.installHooks(inst)
     local manifest = csar.manifests[HeliName] or {}
     csar.manifests[HeliName] = nil
     local pos = HeliUnit and HeliUnit:GetVec2()
-    local mashName = pos and RH.logistics.mashAt(pos, 600)
+    local mashName = pos and RH.logistics.mashAt(pos, RH.config.mash.radius)
     if mashName then
       RH.logistics.admitPatients(mashName, #manifest)
       csar.refreshMashAvailability()
@@ -105,6 +155,20 @@ function csar.list()
     end
   end
   return out
+end
+
+function csar.showOnMap()
+  local pilots = csar.list()
+  if #pilots == 0 then
+    RH.dcs.message("blue", "No downed pilots to mark.", 10)
+    return
+  end
+  for _, p in ipairs(pilots) do
+    local id = "csar-mark-" .. p.name
+    RH.dcs.drawCircle(id, "blue", p.pos, 250, { 0, 0.45, 1, 1 }, { 0, 0.45, 1, 0.28 }, p.description)
+    RH.after(30, function() RH.dcs.removeDrawing(id) end)
+  end
+  RH.dcs.message("blue", string.format("%d downed pilot%s marked in blue for 30 seconds.", #pilots, #pilots == 1 and "" or "s"), 10)
 end
 
 function csar.movePilotsTo(point, range, maxPilots)

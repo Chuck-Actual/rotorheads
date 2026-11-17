@@ -246,14 +246,20 @@ end
 
 function logistics.mashFull(mashName)
   local m = RH.state.mashes[mashName]
-  return m and m.patients >= mcfg().capacity
+  if not m or mcfg().capacity >= 9999 then return false end
+  return m.patients >= mcfg().capacity
 end
 
 function logistics.mashStatus()
   local lines = {}
+  local unlimited = mcfg().capacity >= 9999
   for _, name in ipairs(util.keys(RH.state.mashes)) do
     local m = RH.state.mashes[name]
-    table.insert(lines, string.format("%s: %d/%d patients", name, m.patients, mcfg().capacity))
+    if unlimited then
+      table.insert(lines, string.format("%s: %d patients (unlimited)", name, m.patients))
+    else
+      table.insert(lines, string.format("%s: %d/%d patients", name, m.patients, mcfg().capacity))
+    end
   end
   if #lines == 0 then return "No MASH has been built yet." end
   return table.concat(lines, "\n")
@@ -285,7 +291,7 @@ function logistics.start()
     logistics.registerMash(z.name, z.point)
   end
   for name, m in pairs(RH.state.mashes) do
-    if not RH.dcs.zoneExists(name) then RH.dcs.spawnMash(name, m) end
+    RH.dcs.spawnMash(name, m)
   end
   for _, farp in pairs(RH.state.farps) do
     if farp.built then RH.dcs.spawnFarp(farp) end

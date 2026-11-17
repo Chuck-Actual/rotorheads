@@ -21,9 +21,10 @@ end
 
 function ctld.addFarpZone(farp)
   if not ctld.instance then return end
-  local zoneName = util.startsWith(farp.name, RH.config.prefixes.farp) and farp.name or (RH.config.prefixes.farp .. farp.name)
+  -- A small zone of our own. The mission-editor zone can be huge, and crates should only load at the tent.
+  local zoneName = "RH_LOAD_" .. farp.name
   if not ZONE:FindByName(zoneName) then
-    ZONE_RADIUS:New(zoneName, { x = farp.x, y = farp.y }, RH.config.farp.zoneRadius)
+    ZONE_RADIUS:New(zoneName, { x = farp.x, y = farp.y }, RH.config.farp.loadRadius)
   end
   ctld.instance:AddCTLDZone(zoneName, CTLD.CargoZoneType.LOAD, SMOKECOLOR.Blue, true, true)
 end
