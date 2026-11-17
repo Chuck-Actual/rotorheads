@@ -110,9 +110,26 @@ function world.capture()
   RH.state.world = state
   local path = RH.dcs.savePath and RH.dcs.savePath("world.lua")
   if path and RH.dcs.writeFile then RH.dcs.writeFile(path, util.serialize(state)) end
-  local ok, err = pcall(world.exportEditor)
-  if not ok then util.log("editor export error: %s", tostring(err)) end
+  world._payload = util.serialize(state)
   return true
+end
+
+-- The server hook asks for this. It has file access even when the mission scripting sandbox does not.
+function world.cachePayload()
+  local ok, err = pcall(world.capture)
+  if not ok then
+    world._payload = "error: " .. tostring(err)
+  end
+  world._payload = world._payload or "error: nothing captured"
+  return #world._payload
+end
+
+function world.payloadSlice(index, size)
+  local text = world._payload or ""
+  size = size or 4000
+  index = index or 1
+  local from = (index - 1) * size + 1
+  return text:sub(from, from + size - 1)
 end
 
 function world.savedRoot()

@@ -26,8 +26,17 @@ local function findInflate()
   return nil
 end
 
-local inflate = findInflate()
-assert(inflate, "inflate.lua was not loaded from the Hooks folder")
+local inflate = nil
+
+function miz.use(mod)
+  if type(mod) == "table" and type(mod.inflate) == "function" then inflate = mod end
+end
+
+local function inflater()
+  if inflate and type(inflate.inflate) == "function" then return inflate end
+  inflate = findInflate()
+  return inflate
+end
 
 local function le16(n)
   n = math.floor(n) % 65536
@@ -87,7 +96,9 @@ end
 
 local function inflateRaw(data)
   local out = {}
-  inflate.inflate{ input = data, output = function(b) out[#out + 1] = string.char(b) end }
+  local lib = inflater()
+  if not lib then return nil, "inflate.lua was not loaded" end
+  lib.inflate{ input = data, output = function(b) out[#out + 1] = string.char(b) end }
   return table.concat(out)
 end
 
@@ -493,18 +504,12 @@ function miz.exportBytes(mizBytes, world)
   return writeZip(out)
 end
 
-function miz.exportFile(missionPath, worldPath, destPath)
-  local function read(path)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local s = f:read("*a")
-    f:close()
-    return s
-  end
-  local mizBytes = read(missionPath)
-  if not mizBytes then return nil, "cannot read " .. tostring(missionPath) end
-  local worldText = read(worldPath)
-  if not worldText then return nil, "cannot read " .. tostring(worldPath) end
+function miz.exportText(missionPath, worldText, destPath)
+  local f = io.open(missionPath, "rb")
+  if not f then return nil, "cannot read " .. tostring(missionPath) end
+  local mizBytes = f:read("*a")
+  f:close()
+  if not mizBytes or mizBytes == "" then return nil, "cannot read " .. tostring(missionPath) end
   local fn, err = loadstring("return " .. worldText)
   if not fn then return nil, err end
   if setfenv then setfenv(fn, {}) end
@@ -513,13 +518,22 @@ function miz.exportFile(missionPath, worldPath, destPath)
   local bytes, exportErr = miz.exportBytes(mizBytes, world)
   if not bytes then return nil, exportErr end
   local tmp = destPath .. ".tmp"
-  local f = io.open(tmp, "wb")
-  if not f then return nil, "cannot write " .. tmp end
-  f:write(bytes)
-  f:close()
+  local out = io.open(tmp, "wb")
+  if not out then return nil, "cannot write " .. tmp end
+  out:write(bytes)
+  out:close()
   os.remove(destPath)
   if os.rename(tmp, destPath) == nil then return nil, "cannot replace " .. destPath end
   return true
+end
+
+function miz.exportFile(missionPath, worldPath, destPath)
+  local f = io.open(worldPath, "rb")
+  if not f then return nil, "cannot read " .. tostring(worldPath) end
+  local worldText = f:read("*a")
+  f:close()
+  if not worldText then return nil, "cannot read " .. tostring(worldPath) end
+  return miz.exportText(missionPath, worldText, destPath)
 end
 
 if RH then RH.miz = miz end

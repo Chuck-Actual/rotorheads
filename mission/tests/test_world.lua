@@ -41,6 +41,17 @@ T.test("a moved Humvee is respawned at the saved point", function()
   T.eq(#plan.spawn, 0)
 end)
 
+T.test("the hook can reassemble the world save from slices", function()
+  T.fresh()
+  RH.world._payload = "{\n  name = \"Humvee #1\",\n}\n"
+  T.eq(RH.world.payloadSlice(1, 10), "{\n  name =")
+  T.eq(RH.world.payloadSlice(2, 10), " \"Humvee #")
+  local n = #RH.world._payload
+  local parts = {}
+  for i = 1, math.ceil(n / 10) do parts[#parts + 1] = RH.world.payloadSlice(i, 10) end
+  T.eq(table.concat(parts), RH.world._payload)
+end)
+
 T.test("editor mission is RH Test.miz unless the hook saw another file", function()
   T.fresh()
   local files = { ["C:\\DCS\\Missions\\RH Test.miz"] = true }
