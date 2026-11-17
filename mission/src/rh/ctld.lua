@@ -192,7 +192,12 @@ function ctld.create()
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)
   inst:__Start(2)
-  if inst.enableLoadSave then inst:__Load(10) end
+  -- Once the world snapshot exists it restores vehicles and crates itself. Loading CTLD's
+  -- csv as well would build a second copy. The first run still reads the csv, so a Humvee
+  -- saved only there can come back once and then join the snapshot.
+  if inst.enableLoadSave and not (RH.state.world and RH.state.world.baselineReady) then
+    inst:__Load(10)
+  end
   return inst
 end
 

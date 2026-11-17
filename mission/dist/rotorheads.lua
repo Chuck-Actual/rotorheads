@@ -197,7 +197,8 @@ RH.config = {
 
   -- Folder under Saved Games\DCS\ that holds save files and the live map export.
   saveFolder = "rotorheads",
-  saveInterval = 300,
+  -- Ground units, statics, FARPs, and warehouses are written this often, and again on exit.
+  saveInterval = 30,
   liveMapInterval = 30,
 
   -- Must match the restart interval in server/Hooks/rh_hooks.lua.
@@ -551,6 +552,7 @@ function persistence.load()
 end
 
 function persistence.save()
+  if RH.world and RH.world.capture then RH.world.capture() end
   if RH.logistics and RH.logistics.captureStocks then RH.logistics.captureStocks() end
   RH.state.savedAt = RH.dcs.wallclock()
   local ok = RH.dcs.writeFile(persistence.path("campaign.lua"), util.serialize(RH.state))
@@ -1139,6 +1141,183 @@ end
 
 -- Construction -------------------------------------------------------------------
 
+function dcs.objectExists(name)
+  if type(name) ~= "string" or name == "" then return false end
+  local okG, g = pcall(Group.getByName, name)
+  if okG and g and g.isExist and g:isExist() then return true end
+  local okS, s = pcall(StaticObject.getByName, name)
+  if okS and s and s.isExist and s:isExist() then return true end
+  return false
+end
+
+local function headingOf(obj)
+  local ok, pos = pcall(function() return obj:getPosition() end)
+  if not ok or type(pos) ~= "table" or type(pos.x) ~= "table" then return 0 end
+  local h = math.atan2(pos.x.z or 0, pos.x.x or 1)
+  if h < 0 then h = h + math.pi * 2 end
+  return h
+end
+
+local STATIC_KIND = {
+  ["FARP"] = { category = "Heliports", shape = "FARPS", farp = true },
+  ["FARP Tent"] = { category = "Fortifications", shape = "PalatkaB" },
+  ["FARP Fuel Depot"] = { category = "Fortifications", shape = "GSM Rus" },
+  ["FARP Ammo Dump Coating"] = { category = "Fortifications", shape = "SetkaKP" },
+  ["Windsock"] = { category = "Fortifications", shape = "H-Windsock_RW" },
+}
+
+local function staticDetails(obj)
+  local typeName = obj:getTypeName()
+  local known = STATIC_KIND[typeName] or {}
+  local category, shape = known.category, known.shape
+  local tpl = _DATABASE and _DATABASE.GetStaticUnitTemplate and _DATABASE:GetStaticUnitTemplate(obj:getName())
+  if type(tpl) == "table" then
+    category = category or tpl.category
+    shape = shape or tpl.shape_name
+  end
+  if not category then
+    if typeName and string.find(string.lower(typeName), "crate", 1, true) then category = "Cargos"
+    else category = "Fortifications" end
+  end
+  return typeName, category, shape, known.farp == true
+end
+
+-- Ground groups, ships, and statics that are actually in the world right now.
+function dcs.snapshotGround()
+  if not coalition or not coalition.getGroups then return {} end
+  local out = {}
+  local function pushGroup(g, kind)
+    if not g or not g:isExist() then return end
+    local units = {}
+    for _, u in ipairs(g:getUnits() or {}) do
+      if u:isExist() and u:getLife() > 0 then
+        if u.getPlayerName and u:getPlayerName() then return end
+        local p = u:getPoint()
+        units[#units + 1] = {
+          name = u:getName(),
+          type = u:getTypeName(),
+          x = p.x,
+          y = p.z,
+          heading = headingOf(u),
+          skill = "Average",
+        }
+      end
+    end
+    if #units == 0 then return end
+    out[#out + 1] = {
+      kind = kind,
+      name = g:getName(),
+      coalition = SIDES[g:getCoalition()] or "blue",
+      country = g:getUnit(1) and g:getUnit(1):getCountry() or 2,
+      x = units[1].x,
+      y = units[1].y,
+      heading = units[1].heading,
+      units = units,
+    }
+  end
+  for _, sideId in ipairs({ 0, 1, 2 }) do
+    for _, g in ipairs(coalition.getGroups(sideId, Group.Category.GROUND) or {}) do
+      pushGroup(g, "vehicle")
+    end
+    if Group.Category.SHIP then
+      for _, g in ipairs(coalition.getGroups(sideId, Group.Category.SHIP) or {}) do
+        pushGroup(g, "ship")
+      end
+    end
+    for _, s in ipairs(coalition.getStaticObjects(sideId) or {}) do
+      if s:isExist() and s:getLife() > 0 then
+        local p = s:getPoint()
+        local typeName, category, shape, farp = staticDetails(s)
+        local entry = {
+          kind = "static",
+          name = s:getName(),
+          coalition = SIDES[s:getCoalition()] or "blue",
+          country = s:getCountry(),
+          type = typeName,
+          category = category,
+          shape = shape,
+          x = p.x,
+          y = p.z,
+          heading = headingOf(s),
+        }
+        if farp then
+          entry.farp = true
+          local saved = RH.state and RH.state.farps and RH.state.farps[entry.name]
+          entry.freq = saved and saved.freq or 127.5
+        end
+        out[#out + 1] = entry
+      end
+    end
+  end
+  return out
+end
+
+function dcs.groundRoster()
+  local out = {}
+  for _, obj in ipairs(dcs.snapshotGround()) do
+    out[#out + 1] = { name = obj.name, x = obj.x, y = obj.y }
+  end
+  return out
+end
+
+function dcs.destroyNamed(name)
+  local okG, g = pcall(Group.getByName, name)
+  if okG and g and g:isExist() then g:destroy() return end
+  local okS, s = pcall(StaticObject.getByName, name)
+  if okS and s and s:isExist() then s:destroy() end
+end
+
+function dcs.spawnSnapshot(obj)
+  if type(obj) ~= "table" or type(obj.name) ~= "string" then return false end
+  if obj.kind == "static" then
+    local data = {
+      name = obj.name,
+      type = obj.type or "FARP Tent",
+      category = obj.category or "Fortifications",
+      shape_name = obj.shape,
+      x = obj.x or 0,
+      y = obj.y or 0,
+      heading = obj.heading or 0,
+      dead = false,
+    }
+    if obj.farp then
+      data.category = "Heliports"
+      data.heliport_frequency = tostring(obj.freq or "127.5")
+      data.heliport_modulation = 0
+      data.heliport_callsign_id = 1
+      data.dynamicSpawn = true
+    end
+    local ok = pcall(coalition.addStaticObject, obj.country or country.id.USA, data)
+    return ok
+  end
+  local units = {}
+  for i, unit in ipairs(obj.units or {}) do
+    units[i] = {
+      type = unit.type or obj.type or "Hummer",
+      name = unit.name or obj.name,
+      skill = "Average",
+      x = unit.x or obj.x or 0,
+      y = unit.y or obj.y or 0,
+      heading = unit.heading or obj.heading or 0,
+      playerCanDrive = false,
+      transportable = { randomTransportable = false },
+    }
+  end
+  if #units == 0 then return false end
+  local groupData = {
+    visible = true,
+    task = "Ground Nothing",
+    name = obj.name,
+    x = obj.x or units[1].x,
+    y = obj.y or units[1].y,
+    route = { points = { { x = obj.x or units[1].x, y = obj.y or units[1].y, type = "Off Road", action = "Off Road", speed = 0 } } },
+    units = units,
+  }
+  local category = obj.kind == "ship" and Group.Category.SHIP or Group.Category.GROUND
+  local ok = pcall(coalition.addGroup, obj.country or country.id.USA, category, groupData)
+  return ok
+end
+
 function dcs.spawnVehicle(name, typeName, point, headingDeg)
   local vec = util.toVec2(point)
   local heading = math.rad(headingDeg or 0)
@@ -1169,24 +1348,29 @@ end
 
 function dcs.spawnFarp(farp)
   local pad = COORDINATE:NewFromVec2(util.toVec2(farp))
-  local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
-  helipad:InitShape("FARPS")
-  -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
-  helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
-  helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
+  -- A pad restored from the editor copy is already there. Fill its warehouse instead of building a second one.
+  if not dcs.objectExists(farp.name) then
+    local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
+    helipad:InitShape("FARPS")
+    -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
+    helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
+    helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
+  end
   for _, piece in ipairs(RH.config.farp.services or {}) do
     local spot = pad:Translate(piece.dist or 40, piece.bearing or 0)
     local objectName = farp.name .. " " .. piece.label
-    local ok, err = pcall(function()
-      if piece.kind == "vehicle" then
-        dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.heading or 0)
-      else
-        local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", country.id.USA)
-        if piece.shape then obj:InitShape(piece.shape) end
-        obj:SpawnFromCoordinate(spot, piece.heading or 0, objectName)
-      end
-    end)
-    if not ok then util.log("FARP piece %s failed: %s", objectName, tostring(err)) end
+    if not dcs.objectExists(objectName) then
+      local ok, err = pcall(function()
+        if piece.kind == "vehicle" then
+          dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.heading or 0)
+        else
+          local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", country.id.USA)
+          if piece.shape then obj:InitShape(piece.shape) end
+          obj:SpawnFromCoordinate(spot, piece.heading or 0, objectName)
+        end
+      end)
+      if not ok then util.log("FARP piece %s failed: %s", objectName, tostring(err)) end
+    end
   end
   local function fill()
     local warehouse = dcs.farpWarehouse(farp.name)
@@ -1274,6 +1458,152 @@ end)
 if not __ok then
   env.error("[RH] failed while loading dcs.lua: " .. tostring(__err))
   trigger.action.outText("ROTORHEADS failed while loading dcs.lua: " .. tostring(__err), 60)
+  return
+end end
+-- ===== world.lua =====
+do local __ok, __err = pcall(function()
+RH = RH or {}
+
+local util = RH.util
+
+-- Snapshot of every ground group, ship, and static. This is what comes back on the next
+-- mission start, and what the server hook writes into RH_Editor.miz for the Mission Editor.
+local world = {}
+RH.world = world
+
+-- Recreated by other campaign systems. Saving them here would spawn a second copy.
+local EXCLUDE_PREFIXES = {
+  "Garrison ",
+  "Convoy ",
+  "Factory troops ",
+  "Insurgents",
+  "Havoc",
+  "Red CAP",
+  "Paratroopers",
+  "Supply convoy",
+  "Convoy escort",
+  "Mi-26 ",
+  "RH Pilot ",
+}
+
+function world.excluded(name)
+  if type(name) ~= "string" or name == "" then return true end
+  for _, prefix in ipairs(EXCLUDE_PREFIXES) do
+    if name:sub(1, #prefix) == prefix then return true end
+  end
+  -- The template itself stays in the mission file. A built copy is named with # or -1.
+  if name:sub(1, 7) == "RH_TPL_" and not string.find(name, "#", 1, true) and not string.find(name, "%-%d+$") then
+    return true
+  end
+  return false
+end
+
+function world.farpOwned(name)
+  if type(name) ~= "string" or not RH.state or not RH.state.farps then return false end
+  for farpName in pairs(RH.state.farps) do
+    if name == farpName or name:sub(1, #farpName + 1) == farpName .. " " then return true end
+  end
+  return false
+end
+
+-- alive is a list of { name, x, y } already in the mission when it starts.
+function world.plan(saved, alive)
+  saved = saved or {}
+  local desired = {}
+  for _, obj in ipairs(saved.objects or {}) do
+    if obj.name and not world.excluded(obj.name) then desired[obj.name] = obj end
+  end
+  local baseline = saved.baseline or {}
+  local here = {}
+  for _, obj in ipairs(alive or {}) do
+    if obj.name and not world.excluded(obj.name) then here[obj.name] = obj end
+  end
+  local spawn, destroy, adopt, refresh = {}, {}, {}, {}
+  for name, obj in pairs(desired) do
+    if world.farpOwned(name) then
+      -- The FARP spawner places the pad and its tent, depots, and Humvee.
+    elseif not here[name] then
+      spawn[#spawn + 1] = obj
+    elseif obj.x and here[name].x and util.distance(obj, here[name]) > 25 then
+      refresh[#refresh + 1] = obj
+    end
+  end
+  for name in pairs(here) do
+    if not desired[name] and not world.farpOwned(name) then
+      if baseline[name] then destroy[#destroy + 1] = name else adopt[#adopt + 1] = name end
+    end
+  end
+  local function byName(a, b)
+    local an = type(a) == "table" and a.name or a
+    local bn = type(b) == "table" and b.name or b
+    return tostring(an) < tostring(bn)
+  end
+  table.sort(spawn, byName)
+  table.sort(refresh, byName)
+  table.sort(destroy)
+  table.sort(adopt)
+  return { spawn = spawn, destroy = destroy, adopt = adopt, refresh = refresh }
+end
+
+function world.capture()
+  if not RH.dcs.snapshotGround then return false end
+  local roster = RH.dcs.snapshotGround() or {}
+  local state = RH.state.world or { baseline = {} }
+  state.baseline = state.baseline or {}
+  if not state.baselineReady then
+    state.baseline = {}
+    for _, obj in ipairs(roster) do
+      if not world.excluded(obj.name) and not world.farpOwned(obj.name) then
+        state.baseline[obj.name] = true
+      end
+    end
+    state.baselineReady = true
+  end
+  local objects = {}
+  for _, obj in ipairs(roster) do
+    if not world.excluded(obj.name) then
+      if world.farpOwned(obj.name) then obj.origin = "farp"
+      elseif state.baseline[obj.name] then obj.origin = "baseline"
+      else obj.origin = "runtime" end
+      objects[#objects + 1] = obj
+    end
+  end
+  table.sort(objects, function(a, b) return tostring(a.name) < tostring(b.name) end)
+  state.objects = objects
+  state.savedAt = RH.dcs.wallclock()
+  RH.state.world = state
+  local path = RH.dcs.savePath and RH.dcs.savePath("world.lua")
+  if path and RH.dcs.writeFile then RH.dcs.writeFile(path, util.serialize(state)) end
+  return true
+end
+
+function world.restore()
+  local saved = RH.state.world
+  if not saved or not saved.baselineReady or not RH.dcs.groundRoster then return { spawn = {}, destroy = {}, adopt = {}, refresh = {} } end
+  local plan = world.plan(saved, RH.dcs.groundRoster())
+  for _, name in ipairs(plan.destroy) do
+    if RH.dcs.destroyNamed then RH.dcs.destroyNamed(name) end
+  end
+  for _, obj in ipairs(plan.refresh) do
+    if RH.dcs.destroyNamed then RH.dcs.destroyNamed(obj.name) end
+    if RH.dcs.spawnSnapshot then RH.dcs.spawnSnapshot(obj) end
+  end
+  for _, obj in ipairs(plan.spawn) do
+    if RH.dcs.spawnSnapshot then RH.dcs.spawnSnapshot(obj) end
+  end
+  saved.baseline = saved.baseline or {}
+  for _, name in ipairs(plan.adopt) do saved.baseline[name] = true end
+  util.log("world restore: %d spawned, %d moved, %d removed, %d new editor units kept",
+    #plan.spawn, #plan.refresh, #plan.destroy, #plan.adopt)
+  return plan
+end
+
+return world
+
+end)
+if not __ok then
+  env.error("[RH] failed while loading world.lua: " .. tostring(__err))
+  trigger.action.outText("ROTORHEADS failed while loading world.lua: " .. tostring(__err), 60)
   return
 end end
 -- ===== logistics.lua =====
@@ -1467,7 +1797,7 @@ function logistics.buildFarp(point, builtBy)
   RH.dcs.smoke(farp, RH.config.markers.smokeColors.green)
   if RH.persistence and RH.persistence.save then RH.persistence.save() end
   RH.dcs.message("blue", string.format(
-    "%s marked %s and saved it. Restart the mission to build it. It will not appear in the mission editor. The restart spawns the pad on dynamic spawn, plus a tent, Humvee, M818, fuel depot, and ammo dump, with no fuel and no ammo.",
+    "%s marked %s and saved it. Restart the mission to build the pad, tent, Humvee, fuel depot, and ammo dump. The Mission Editor copy is RH_Editor.miz, written beside your mission when you leave.",
     builtBy or "A pilot", name), 30)
   RH.dcs.notify("farp_marked", { farp = name, kind = kind })
   return farp
@@ -3115,7 +3445,12 @@ function ctld.create()
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)
   inst:__Start(2)
-  if inst.enableLoadSave then inst:__Load(10) end
+  -- Once the world snapshot exists it restores vehicles and crates itself. Loading CTLD's
+  -- csv as well would build a second copy. The first run still reads the csv, so a Humvee
+  -- saved only there can come back once and then join the snapshot.
+  if inst.enableLoadSave and not (RH.state.world and RH.state.world.baselineReady) then
+    inst:__Load(10)
+  end
   return inst
 end
 
@@ -3942,7 +4277,7 @@ function chat.handle(playerName, text)
     RH.dcs.message("blue", RH.logistics.mashStatus(), 15)
   elseif cmd == "-save" then
     RH.persistence.save()
-    RH.dcs.message("all", "Campaign saved.", 5)
+    RH.dcs.message("all", "Campaign saved. Ground units are in the save. RH_Editor.miz, beside your mission, is the copy the Mission Editor can open.", 12)
   end
 end
 
@@ -3963,6 +4298,7 @@ function RH.start()
     RH.dcs.message("all", "ROTORHEADS WARNING: MissionScripting.lua is not desanitized, so the campaign will NOT be saved. See README step 1.", 60)
   end
   RH.persistence.load()
+  if RH.world and RH.world.restore then RH.world.restore() end
   RH.events.install()
 
   RH.logistics.start()

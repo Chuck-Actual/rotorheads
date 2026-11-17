@@ -187,7 +187,7 @@ function logistics.buildFarp(point, builtBy)
   RH.dcs.smoke(farp, RH.config.markers.smokeColors.green)
   if RH.persistence and RH.persistence.save then RH.persistence.save() end
   RH.dcs.message("blue", string.format(
-    "%s marked %s and saved it. Restart the mission to build it. It will not appear in the mission editor. The restart spawns the pad on dynamic spawn, plus a tent, Humvee, M818, fuel depot, and ammo dump, with no fuel and no ammo.",
+    "%s marked %s and saved it. Restart the mission to build the pad, tent, Humvee, fuel depot, and ammo dump. The Mission Editor copy is RH_Editor.miz, written beside your mission when you leave.",
     builtBy or "A pilot", name), 30)
   RH.dcs.notify("farp_marked", { farp = name, kind = kind })
   return farp

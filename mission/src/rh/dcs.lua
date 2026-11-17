@@ -561,6 +561,183 @@ end
 
 -- Construction -------------------------------------------------------------------
 
+function dcs.objectExists(name)
+  if type(name) ~= "string" or name == "" then return false end
+  local okG, g = pcall(Group.getByName, name)
+  if okG and g and g.isExist and g:isExist() then return true end
+  local okS, s = pcall(StaticObject.getByName, name)
+  if okS and s and s.isExist and s:isExist() then return true end
+  return false
+end
+
+local function headingOf(obj)
+  local ok, pos = pcall(function() return obj:getPosition() end)
+  if not ok or type(pos) ~= "table" or type(pos.x) ~= "table" then return 0 end
+  local h = math.atan2(pos.x.z or 0, pos.x.x or 1)
+  if h < 0 then h = h + math.pi * 2 end
+  return h
+end
+
+local STATIC_KIND = {
+  ["FARP"] = { category = "Heliports", shape = "FARPS", farp = true },
+  ["FARP Tent"] = { category = "Fortifications", shape = "PalatkaB" },
+  ["FARP Fuel Depot"] = { category = "Fortifications", shape = "GSM Rus" },
+  ["FARP Ammo Dump Coating"] = { category = "Fortifications", shape = "SetkaKP" },
+  ["Windsock"] = { category = "Fortifications", shape = "H-Windsock_RW" },
+}
+
+local function staticDetails(obj)
+  local typeName = obj:getTypeName()
+  local known = STATIC_KIND[typeName] or {}
+  local category, shape = known.category, known.shape
+  local tpl = _DATABASE and _DATABASE.GetStaticUnitTemplate and _DATABASE:GetStaticUnitTemplate(obj:getName())
+  if type(tpl) == "table" then
+    category = category or tpl.category
+    shape = shape or tpl.shape_name
+  end
+  if not category then
+    if typeName and string.find(string.lower(typeName), "crate", 1, true) then category = "Cargos"
+    else category = "Fortifications" end
+  end
+  return typeName, category, shape, known.farp == true
+end
+
+-- Ground groups, ships, and statics that are actually in the world right now.
+function dcs.snapshotGround()
+  if not coalition or not coalition.getGroups then return {} end
+  local out = {}
+  local function pushGroup(g, kind)
+    if not g or not g:isExist() then return end
+    local units = {}
+    for _, u in ipairs(g:getUnits() or {}) do
+      if u:isExist() and u:getLife() > 0 then
+        if u.getPlayerName and u:getPlayerName() then return end
+        local p = u:getPoint()
+        units[#units + 1] = {
+          name = u:getName(),
+          type = u:getTypeName(),
+          x = p.x,
+          y = p.z,
+          heading = headingOf(u),
+          skill = "Average",
+        }
+      end
+    end
+    if #units == 0 then return end
+    out[#out + 1] = {
+      kind = kind,
+      name = g:getName(),
+      coalition = SIDES[g:getCoalition()] or "blue",
+      country = g:getUnit(1) and g:getUnit(1):getCountry() or 2,
+      x = units[1].x,
+      y = units[1].y,
+      heading = units[1].heading,
+      units = units,
+    }
+  end
+  for _, sideId in ipairs({ 0, 1, 2 }) do
+    for _, g in ipairs(coalition.getGroups(sideId, Group.Category.GROUND) or {}) do
+      pushGroup(g, "vehicle")
+    end
+    if Group.Category.SHIP then
+      for _, g in ipairs(coalition.getGroups(sideId, Group.Category.SHIP) or {}) do
+        pushGroup(g, "ship")
+      end
+    end
+    for _, s in ipairs(coalition.getStaticObjects(sideId) or {}) do
+      if s:isExist() and s:getLife() > 0 then
+        local p = s:getPoint()
+        local typeName, category, shape, farp = staticDetails(s)
+        local entry = {
+          kind = "static",
+          name = s:getName(),
+          coalition = SIDES[s:getCoalition()] or "blue",
+          country = s:getCountry(),
+          type = typeName,
+          category = category,
+          shape = shape,
+          x = p.x,
+          y = p.z,
+          heading = headingOf(s),
+        }
+        if farp then
+          entry.farp = true
+          local saved = RH.state and RH.state.farps and RH.state.farps[entry.name]
+          entry.freq = saved and saved.freq or 127.5
+        end
+        out[#out + 1] = entry
+      end
+    end
+  end
+  return out
+end
+
+function dcs.groundRoster()
+  local out = {}
+  for _, obj in ipairs(dcs.snapshotGround()) do
+    out[#out + 1] = { name = obj.name, x = obj.x, y = obj.y }
+  end
+  return out
+end
+
+function dcs.destroyNamed(name)
+  local okG, g = pcall(Group.getByName, name)
+  if okG and g and g:isExist() then g:destroy() return end
+  local okS, s = pcall(StaticObject.getByName, name)
+  if okS and s and s:isExist() then s:destroy() end
+end
+
+function dcs.spawnSnapshot(obj)
+  if type(obj) ~= "table" or type(obj.name) ~= "string" then return false end
+  if obj.kind == "static" then
+    local data = {
+      name = obj.name,
+      type = obj.type or "FARP Tent",
+      category = obj.category or "Fortifications",
+      shape_name = obj.shape,
+      x = obj.x or 0,
+      y = obj.y or 0,
+      heading = obj.heading or 0,
+      dead = false,
+    }
+    if obj.farp then
+      data.category = "Heliports"
+      data.heliport_frequency = tostring(obj.freq or "127.5")
+      data.heliport_modulation = 0
+      data.heliport_callsign_id = 1
+      data.dynamicSpawn = true
+    end
+    local ok = pcall(coalition.addStaticObject, obj.country or country.id.USA, data)
+    return ok
+  end
+  local units = {}
+  for i, unit in ipairs(obj.units or {}) do
+    units[i] = {
+      type = unit.type or obj.type or "Hummer",
+      name = unit.name or obj.name,
+      skill = "Average",
+      x = unit.x or obj.x or 0,
+      y = unit.y or obj.y or 0,
+      heading = unit.heading or obj.heading or 0,
+      playerCanDrive = false,
+      transportable = { randomTransportable = false },
+    }
+  end
+  if #units == 0 then return false end
+  local groupData = {
+    visible = true,
+    task = "Ground Nothing",
+    name = obj.name,
+    x = obj.x or units[1].x,
+    y = obj.y or units[1].y,
+    route = { points = { { x = obj.x or units[1].x, y = obj.y or units[1].y, type = "Off Road", action = "Off Road", speed = 0 } } },
+    units = units,
+  }
+  local category = obj.kind == "ship" and Group.Category.SHIP or Group.Category.GROUND
+  local ok = pcall(coalition.addGroup, obj.country or country.id.USA, category, groupData)
+  return ok
+end
+
 function dcs.spawnVehicle(name, typeName, point, headingDeg)
   local vec = util.toVec2(point)
   local heading = math.rad(headingDeg or 0)
@@ -591,24 +768,29 @@ end
 
 function dcs.spawnFarp(farp)
   local pad = COORDINATE:NewFromVec2(util.toVec2(farp))
-  local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
-  helipad:InitShape("FARPS")
-  -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
-  helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
-  helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
+  -- A pad restored from the editor copy is already there. Fill its warehouse instead of building a second one.
+  if not dcs.objectExists(farp.name) then
+    local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
+    helipad:InitShape("FARPS")
+    -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
+    helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
+    helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
+  end
   for _, piece in ipairs(RH.config.farp.services or {}) do
     local spot = pad:Translate(piece.dist or 40, piece.bearing or 0)
     local objectName = farp.name .. " " .. piece.label
-    local ok, err = pcall(function()
-      if piece.kind == "vehicle" then
-        dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.heading or 0)
-      else
-        local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", country.id.USA)
-        if piece.shape then obj:InitShape(piece.shape) end
-        obj:SpawnFromCoordinate(spot, piece.heading or 0, objectName)
-      end
-    end)
-    if not ok then util.log("FARP piece %s failed: %s", objectName, tostring(err)) end
+    if not dcs.objectExists(objectName) then
+      local ok, err = pcall(function()
+        if piece.kind == "vehicle" then
+          dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.heading or 0)
+        else
+          local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", country.id.USA)
+          if piece.shape then obj:InitShape(piece.shape) end
+          obj:SpawnFromCoordinate(spot, piece.heading or 0, objectName)
+        end
+      end)
+      if not ok then util.log("FARP piece %s failed: %s", objectName, tostring(err)) end
+    end
   end
   local function fill()
     local warehouse = dcs.farpWarehouse(farp.name)

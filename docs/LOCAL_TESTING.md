@@ -12,7 +12,8 @@ Players spawn with **dynamic slots** at blue airfields and FARPs, so there are n
 | `C:\Rotorheads\` | Your copy of this project. Any folder works; the steps below assume this one. |
 | `%USERPROFILE%\Saved Games\DCS\Missions\Rotorheads\` | `rotorheads.lua` and `Moose_.lua` (copied by the install script). Save your `.miz` here too. |
 | `%USERPROFILE%\Saved Games\DCS\Scripts\Hooks\rh_hooks.lua` | The server hook (chat commands, restart timer). Copied by the install script. |
-| `%USERPROFILE%\Saved Games\DCS\rotorheads\` | Campaign saves (`campaign.lua`, `ctld.csv`, `csar.csv`) and `livemap.json`. **Delete it to start a fresh war.** |
+| `%USERPROFILE%\Saved Games\DCS\rotorheads\` | Campaign saves (`campaign.lua`, `world.lua`, `ctld.csv`, `csar.csv`) and `livemap.json`. **Delete it to start a fresh war.** |
+| `RH_Editor.miz`, next to the mission you launched | A copy of that mission with the saved ground units, FARPs, and statics written in. Open this in the Mission Editor when you need to fix something by hand. The file you launched is left unchanged. |
 | `%USERPROFILE%\Saved Games\DCS\Logs\dcs.log` | The log. Every campaign line starts with `[RH]`. |
 | `<DCS install>\Scripts\MissionScripting.lua` | Must be edited so the campaign can save (the install script does it). |
 
@@ -130,7 +131,7 @@ Do these in order. Stop at the first one that fails and send me what happened (s
 | # | Do this | You should see |
 | --- | --- | --- |
 | 1 | Wait ~5 s after the mission starts | On-screen: *"Rotorheads Private is live. Type -lives…"*. If you also see a *WARNING… not desanitized* message, re-run step 2 as Administrator. |
-| 2 | Look in `Saved Games\DCS\rotorheads\` | `campaign.lua` and `livemap.json` exist. |
+| 2 | Look in `Saved Games\DCS\rotorheads\` | `campaign.lua`, `world.lua`, and `livemap.json` exist. `world.lua` is rewritten every 30 seconds. |
 | 3 | Chat `-help`, `-time`, `-lives`, `-farps` | Replies in chat. `-farps` lists the Bassel zone marked **(LC)** with unlimited crates. |
 | 4 | F10 map → Other → **CTLD** → Manage Troops | Load **Standard (6)** while on the apron, take off, land, unload. Blue infantry appears. |
 | 5 | In a Chinook (6 internal crates): CTLD → Manage Crates → **Humvee TOW** → **1**. That loads four small CDS crates. Fly at least 300 m off the apron, drop them, then Manage Crates → Build while the four are within 50 m | A TOW HMMWV is built where the crates were. |
@@ -140,7 +141,23 @@ Do these in order. Stop at the first one that fails and send me what happened (s
 | 9 | Unload your 6 troops in the yellow zone after clearing the red units | Zone turns blue; after 60–90 s the outpost is captured. |
 | 10 | Spawn an **AH-64D** or **Ka-50**, crash or eject | `-lives` shows 2. A downed pilot appears (F10 → Other → CSAR). |
 | 11 | Rescue that pilot in a UH-1H and land at the MASH / airfield | Message that the life was restored; `-lives` shows 3 again. |
-| 12 | Type `-save`, end the mission, start it again | Captured outpost stays captured, built units are back, lives are kept. |
+| 12 | Type `-save`, end the mission, start it again | Captured outpost stays captured, built units are back where you left them, lives are kept. |
+
+## Saves and the Mission Editor
+
+The running mission is not the file the editor has open. Units built after launch (Humvees, crates, FARP pads)
+live in the simulation until they are written out. Every 30 seconds, and again when you leave, the script
+records ground units, ships, statics, and FARP warehouses into `world.lua`. The next launch puts back anything
+that is missing, and removes an editor-placed ground unit that was destroyed.
+
+Leaving the mission also writes `RH_Editor.miz` in the same folder as the mission you launched. Open **that**
+file in the Mission Editor when you want to move or delete something by hand. The mission you have been
+flying is not overwritten. After you edit `RH_Editor.miz`, launch that file if you want the hand edit to be
+the one the campaign continues from. A new unit you place in it is kept. Cargo that is inside a helicopter
+at the moment of the save is not part of this snapshot.
+
+Re-run `tools\windows\install.ps1` after this update so the hook that writes `RH_Editor.miz` is installed.
+DCS has to be restarted before a new hook loads.
 
 ## Step 6: When something is wrong
 

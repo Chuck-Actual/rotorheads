@@ -6,7 +6,8 @@ RH.config = {
 
   -- Folder under Saved Games\DCS\ that holds save files and the live map export.
   saveFolder = "rotorheads",
-  saveInterval = 300,
+  -- Ground units, statics, FARPs, and warehouses are written this often, and again on exit.
+  saveInterval = 30,
   liveMapInterval = 30,
 
   -- Must match the restart interval in server/Hooks/rh_hooks.lua.

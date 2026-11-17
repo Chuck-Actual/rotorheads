@@ -4,6 +4,10 @@ The scripts find everything by name, so the mission file only needs objects plac
 Nothing has to be scripted by hand. Start with one factory, one outpost, two areas of operation and one FARP,
 check it works, then grow the map.
 
+Units you build during a flight are written to `RH_Editor.miz` beside the mission (see
+[LOCAL_TESTING.md](LOCAL_TESTING.md)). Open that copy to inspect or repair them. Editing the original file
+does not show those units.
+
 The examples use the **Syria** map (Latakia → Aleppo front, as on Rotorheads), but any map works.
 
 ## 1. Load the scripts

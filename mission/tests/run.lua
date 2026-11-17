@@ -1,7 +1,7 @@
 -- Test runner. Usage (from the mission/ folder): lua5.1 tests/run.lua
 package.path = "./?.lua;" .. package.path
 
-local LOGIC_MODULES = { "util", "config", "core", "logistics", "outposts", "factories", "redair", "lives", "markers", "convoy", "livemap" }
+local LOGIC_MODULES = { "util", "config", "core", "world", "logistics", "outposts", "factories", "redair", "lives", "markers", "convoy", "livemap" }
 
 local T = { passed = 0, failed = 0, failures = {} }
 
@@ -41,7 +41,7 @@ end
 
 _G.T = T
 
-local suites = { "test_util", "test_markers", "test_logistics", "test_lives", "test_outposts", "test_factories", "test_convoy", "test_livemap" }
+local suites = { "test_util", "test_world", "test_miz", "test_markers", "test_logistics", "test_lives", "test_outposts", "test_factories", "test_convoy", "test_livemap" }
 for _, s in ipairs(suites) do
   print(s)
   dofile("tests/" .. s .. ".lua")

@@ -90,7 +90,11 @@ Ok (Join-Path $missionDir "rotorheads.lua")
 
 Step "Copying server hook"
 Copy-Item -Force (Join-Path $repo "server\Hooks\rh_hooks.lua") (Join-Path $hooksDir "rh_hooks.lua")
+Copy-Item -Force (Join-Path $repo "mission\src\rh\miz.lua") (Join-Path $hooksDir "rh_miz.lua")
+Copy-Item -Force (Join-Path $repo "mission\src\rh\inflate.lua") (Join-Path $hooksDir "inflate.lua")
 Ok (Join-Path $hooksDir "rh_hooks.lua")
+Ok (Join-Path $hooksDir "rh_miz.lua")
+Ok (Join-Path $hooksDir "inflate.lua")
 
 Step "Downloading MOOSE ($MooseVersion)"
 $moose = Join-Path $missionDir "Moose_.lua"

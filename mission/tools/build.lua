@@ -2,7 +2,7 @@
 -- Usage (from the mission/ folder): lua5.1 tools/build.lua
 
 local MODULES = {
-  "util", "config", "core", "dcs",
+  "util", "config", "core", "dcs", "world",
   "logistics", "outposts", "factories", "redair", "lives",
   "markers", "convoy", "livemap", "ctld", "csar", "main",
 }

@@ -12,6 +12,7 @@ local RHHook = {
   shutdownSent = false,
   lastCheck = 0,
   emptySince = nil,
+  lastEditorExport = 0,
 }
 
 local function log(msg) net.log("[RH hook] " .. msg) end
@@ -29,6 +30,56 @@ local function fmt(seconds)
   return string.format("%dh %02dm", math.floor(seconds / 3600), math.floor(seconds % 3600 / 60))
 end
 
+local function editorPaths()
+  local mission = DCS.getMissionFilename()
+  if type(mission) ~= "string" or mission == "" then return nil end
+  local dir, filename = mission:match("^(.*)[/\\]([^/\\]+)$")
+  if not dir then return nil end
+  local sep = mission:find("\\", 1, true) and "\\" or "/"
+  local world = lfs.writedir() .. "rotorheads" .. sep .. "world.lua"
+  local dest = dir .. sep .. "RH_Editor.miz"
+  return mission, world, dest, filename
+end
+
+local function exportEditor(reason)
+  local mission, world, dest, filename = editorPaths()
+  if not mission then
+    log("editor export skipped (" .. reason .. "): mission path unavailable")
+    return
+  end
+  if filename == "RH_Editor.miz" and reason ~= "exit" then
+    return
+  end
+  if not lfs.attributes(world) then return end
+  local attr = lfs.attributes(mission)
+  if reason ~= "exit" and attr and attr.size and attr.size > 8 * 1024 * 1024 then
+    if not RHHook.editorDeferred then
+      RHHook.editorDeferred = true
+      log("editor export deferred until exit (" .. math.floor(attr.size / 1024) .. " KB mission)")
+    end
+    return
+  end
+  local hooks = lfs.writedir() .. "Scripts/Hooks/"
+  local okInflate, inflateOrErr = pcall(dofile, hooks .. "inflate.lua")
+  if not okInflate then
+    log("editor export skipped: " .. tostring(inflateOrErr))
+    return
+  end
+  RH_INFLATE = inflateOrErr
+  local okMiz, mizOrErr = pcall(dofile, hooks .. "rh_miz.lua")
+  if not okMiz then
+    log("editor export skipped: " .. tostring(mizOrErr))
+    return
+  end
+  local started = DCS.getRealTime()
+  local ok, err = mizOrErr.exportFile(mission, world, dest)
+  if ok then
+    log(string.format("wrote %s (%s, %.1fs)", dest, reason, DCS.getRealTime() - started))
+  else
+    log("editor export failed (" .. reason .. "): " .. tostring(err))
+  end
+end
+
 local function restart(reason)
   log("restarting mission: " .. reason)
   toMission("RH.shutdown()")
@@ -36,9 +87,12 @@ local function restart(reason)
 end
 
 function RHHook.onSimulationStop()
-  if RHHook.shutdownSent then return end
-  RHHook.shutdownSent = true
-  toMission("RH.shutdown()")
+  if not RHHook.shutdownSent then
+    RHHook.shutdownSent = true
+    toMission("RH.shutdown()")
+  end
+  local ok, err = pcall(exportEditor, "exit")
+  if not ok then log("editor export error: " .. tostring(err)) end
 end
 
 function RHHook.onSimulationStart()
@@ -51,6 +105,11 @@ function RHHook.onSimulationFrame()
   local now = DCS.getRealTime()
   if now - RHHook.lastCheck < 5 then return end
   RHHook.lastCheck = now
+  if now - RHHook.lastEditorExport >= 30 then
+    RHHook.lastEditorExport = now
+    local ok, err = pcall(exportEditor, "autosave")
+    if not ok then log("editor export error: " .. tostring(err)) end
+  end
   if not DCS.isServer() or not DCS.isMultiplayer() then return end
 
   local left = secondsLeft()
