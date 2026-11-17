@@ -53,8 +53,10 @@ function ctld.create()
   inst.usesubcats = true
   inst.allowcratepickupagain = true
   inst.TroopUnloadDistGroundHook = 15
-  -- Small CDS boxes (C-130J mod) rather than the big container_cargo static.
-  inst.basetype = "cds_crate"
+  inst.useaircraftheadingforbuilds = true
+  -- Same CDS box the C-130 loads (22 of them), for helicopters and the Hercules.
+  inst.basetype = c.crateModel or "cds_crate"
+  inst.C130basetype = inst.basetype
 
   inst.enableLoadSave = RH.dcs.filesEnabled()
   inst.saveinterval = c.saveInterval
@@ -68,13 +70,16 @@ function ctld.create()
   for _, t in ipairs(c.troops) do
     inst:AddTroopsCargo(t.name, { t.template }, CTLD_CARGO.Enum.TROOPS, t.size, c.troopWeight, nil, t.subcat)
   end
-  for _, v in ipairs(c.vehicles) do
-    inst:AddCratesCargo(v.name, { v.template }, CTLD_CARGO.Enum.VEHICLE, v.crates, v.mass, nil, v.subcat)
+  local function addCrates(name, template, kind, crates, mass, subcat)
+    inst:AddCratesCargo(name, { template }, kind, crates, mass, nil, subcat, nil, nil, nil, "Cargos", inst.basetype, nil, inst.basetype)
   end
-  inst:AddCratesCargo(c.kits.farp.name, { c.kits.farp.template }, CTLD_CARGO.Enum.FOB, c.farp.cratesForFarp, c.farp.farpCrateMass, nil, "Construction")
-  inst:AddCratesCargo(c.kits.mash.name, { c.kits.mash.template }, CTLD_CARGO.Enum.FOB, c.mash.crates, c.mash.crateMass, nil, "Construction")
-  inst:AddCratesCargo(c.kits.outpost.name, { c.kits.outpost.template }, CTLD_CARGO.Enum.FOB, c.kits.outpost.crates, c.kits.outpost.mass, nil, "Construction")
-  inst:AddCratesCargo(c.kits.uhRepair.name, { c.kits.uhRepair.template }, CTLD_CARGO.Enum.FOB, c.kits.uhRepair.crates, c.kits.uhRepair.mass, nil, "Construction")
+  for _, v in ipairs(c.vehicles) do
+    addCrates(v.name, v.template, CTLD_CARGO.Enum.VEHICLE, v.crates, v.mass, v.subcat)
+  end
+  addCrates(c.kits.farp.name, c.kits.farp.template, CTLD_CARGO.Enum.FOB, c.farp.cratesForFarp, c.farp.farpCrateMass, "Construction")
+  addCrates(c.kits.mash.name, c.kits.mash.template, CTLD_CARGO.Enum.FOB, c.mash.crates, c.mash.crateMass, "Construction")
+  addCrates(c.kits.outpost.name, c.kits.outpost.template, CTLD_CARGO.Enum.FOB, c.kits.outpost.crates, c.kits.outpost.mass, "Construction")
+  addCrates(c.kits.uhRepair.name, c.kits.uhRepair.template, CTLD_CARGO.Enum.FOB, c.kits.uhRepair.crates, c.kits.uhRepair.mass, "Construction")
 
   for _, ship in ipairs(c.ships) do
     if UNIT:FindByName(ship.unit) then
@@ -88,6 +93,18 @@ function ctld.create()
   inst:__Start(2)
   if inst.enableLoadSave then inst:__Load(10) end
   return inst
+end
+
+-- Put a freshly built vehicle 10 m behind the tail, facing the same way as the helicopter.
+function ctld.placeBehind(group, pilot)
+  if not group or not pilot or not group:IsAlive() or not pilot:IsAlive() then return end
+  local heading = pilot:GetHeading() or 0
+  local airframe = RH.config.airframes[pilot:GetTypeName()]
+  local length = airframe and airframe.length or 15
+  local dest = pilot:GetCoordinate():Translate(length / 2 + 10, (heading + 180) % 360)
+  group:InitZone(dest)
+  group:InitHeading(heading)
+  group:Respawn(nil, true)
 end
 
 function ctld.installHooks(inst)
@@ -128,8 +145,17 @@ function ctld.installHooks(inst)
   function inst:OnAfterCratesBuild(From, Event, To, Group, Unit, Vehicle)
     if not Group or not Vehicle then return end
     local kit = templateKit(Vehicle:GetName())
-    if not kit then return end
+    if not kit then
+      ctld.placeBehind(Vehicle, Unit)
+      return
+    end
     local point = Vehicle:GetVec2()
+    if Unit and Unit:IsAlive() then
+      local heading = Unit:GetHeading() or 0
+      local airframe = RH.config.airframes[Unit:GetTypeName()]
+      local length = airframe and airframe.length or 15
+      point = Unit:GetCoordinate():Translate(length / 2 + 10, (heading + 180) % 360):GetVec2()
+    end
     local player = Unit and Unit:GetPlayerName() or "A pilot"
     local ok, reason
     if kit == "farp" then

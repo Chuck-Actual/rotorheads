@@ -157,6 +157,9 @@ RH.config = {
     { name = "Special Ops (4)", template = "RH_TPL_BLUE_INF_SOF_4", size = 4, subcat = "Special Ops" },
   },
 
+  -- Ground model for every CTLD crate. This is the C-130J CDS box, the one a Hercules loads 22 of.
+  crateModel = "cds_crate",
+
   -- Vehicle crates. `crates` is how many small CDS crates must sit within 50 m before Build works.
   -- `mass` is kg per crate. A Humvee is four crates. A Chinook (6 internal) can lift one in a single trip.
   vehicles = {
