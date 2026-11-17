@@ -620,6 +620,15 @@ function dcs.spawnFarp(farp)
   for item, amount in pairs(farp.ammoItems or {}) do
     if type(amount) == "number" and amount > 0 and wh.SetItem then wh:SetItem(item, amount) end
   end
+  if not farp.airframes then
+    farp.airframes = {}
+    for typeName in pairs(RH.config.airframes) do
+      farp.airframes[typeName] = RH.config.farp.airframes or 4
+    end
+  end
+  for typeName, amount in pairs(farp.airframes) do
+    if type(amount) == "number" and amount > 0 and wh.SetItem then wh:SetItem(typeName, amount) end
+  end
 end
 
 -- Read the live warehouse so the next restart spawns the same fuel and ammo.
@@ -648,6 +657,12 @@ function dcs.captureFarpStock(farp)
     end
   end
   farp.ammoItems = items
+  local frames = {}
+  for typeName in pairs(RH.config.airframes or {}) do
+    local okN, n = pcall(function() return wh:GetItemAmount(typeName) end)
+    if okN and type(n) == "number" then frames[typeName] = n end
+  end
+  if next(frames) then farp.airframes = frames end
   return true
 end
 

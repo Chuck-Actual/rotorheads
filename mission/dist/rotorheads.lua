@@ -298,16 +298,17 @@ RH.config = {
     -- Crates and troops load within this distance of the logistics tent.
     loadRadius = 150,
     displayCirclesFor = 60,
-    -- Western FARP services. The pad is the dynamic-spawn heliport. DCS will not rearm, refuel,
-    -- or repair unless these are beside it: Humvee for the radio, M818 for power and rearm,
-    -- fuel depot for fuel, ammo dump for ordnance, tent for repair.
+    -- How many of each helicopter the warehouse starts with. Dynamic spawn stays grey at zero.
+    -- Fuel and weapons stay empty until they are hauled in.
+    airframes = 4,
+    -- The pad is the heliport. The Humvee is the ground crew. The depot, ammo dump, and tent
+    -- are the fuel, ordnance, and repair points. Refuel only works while sitting on the pad.
     services = {
       { kind = "static", label = "Tent", typeName = "FARP Tent", shape = "PalatkaB", category = "Fortifications", dist = 50, bearing = 180 },
       { kind = "static", label = "Fuel", typeName = "FARP Fuel Depot", shape = "GSM Rus", category = "Fortifications", dist = 70, bearing = 150 },
       { kind = "static", label = "Ammo", typeName = "FARP Ammo Dump Coating", shape = "SetkaKP", category = "Fortifications", dist = 70, bearing = 210 },
       { kind = "static", label = "Windsock", typeName = "Windsock", shape = "H-Windsock_RW", category = "Fortifications", dist = 40, bearing = 0 },
       { kind = "vehicle", label = "Humvee", typeName = "Hummer", dist = 35, bearing = 100 },
-      { kind = "vehicle", label = "Power", typeName = "M 818", dist = 35, bearing = 260 },
     },
   },
 
@@ -1191,6 +1192,15 @@ function dcs.spawnFarp(farp)
   for item, amount in pairs(farp.ammoItems or {}) do
     if type(amount) == "number" and amount > 0 and wh.SetItem then wh:SetItem(item, amount) end
   end
+  if not farp.airframes then
+    farp.airframes = {}
+    for typeName in pairs(RH.config.airframes) do
+      farp.airframes[typeName] = RH.config.farp.airframes or 4
+    end
+  end
+  for typeName, amount in pairs(farp.airframes) do
+    if type(amount) == "number" and amount > 0 and wh.SetItem then wh:SetItem(typeName, amount) end
+  end
 end
 
 -- Read the live warehouse so the next restart spawns the same fuel and ammo.
@@ -1219,6 +1229,12 @@ function dcs.captureFarpStock(farp)
     end
   end
   farp.ammoItems = items
+  local frames = {}
+  for typeName in pairs(RH.config.airframes or {}) do
+    local okN, n = pcall(function() return wh:GetItemAmount(typeName) end)
+    if okN and type(n) == "number" then frames[typeName] = n end
+  end
+  if next(frames) then farp.airframes = frames end
   return true
 end
 

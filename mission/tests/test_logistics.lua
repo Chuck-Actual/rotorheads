@@ -87,7 +87,7 @@ T.test("a FARP brings the services DCS needs to rearm and refuel", function()
   T.ok(types["FARP Fuel Depot"])
   T.ok(types["FARP Ammo Dump Coating"])
   T.ok(types["Hummer"])
-  T.ok(types["M 818"])
+  T.ok(not types["M 818"])
 end)
 
 T.test("a marked FARP waits for the next restart and then spawns empty", function()
