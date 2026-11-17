@@ -537,11 +537,55 @@ end
 
 -- Construction -------------------------------------------------------------------
 
+function dcs.spawnVehicle(name, typeName, point, headingDeg)
+  local vec = util.toVec2(point)
+  local heading = math.rad(headingDeg or 0)
+  local groupData = {
+    visible = false,
+    hidden = false,
+    task = "Ground Nothing",
+    name = name,
+    x = vec.x,
+    y = vec.y,
+    start_time = 0,
+    route = { points = { { x = vec.x, y = vec.y, type = "Off Road", action = "Off Road", speed = 0 } } },
+    units = {
+      {
+        type = typeName,
+        name = name,
+        skill = "Average",
+        x = vec.x,
+        y = vec.y,
+        heading = heading,
+        playerCanDrive = false,
+        transportable = { randomTransportable = false },
+      },
+    },
+  }
+  return coalition.addGroup(country.id.USA, Group.Category.GROUND, groupData)
+end
+
 function dcs.spawnFarp(farp)
-  -- Empty warehouse. Saved fuel and ammo are written back just below, so a restart does not refill or wipe them.
-  UTILS.SpawnFARPAndFunctionalStatics(farp.name, COORDINATE:NewFromVec2(util.toVec2(farp)), ENUMS.FARPType.FARP,
-    coalition.side.BLUE, country.id.USA, CALLSIGN.FARP.Berlin, 127.5, radio.modulation.AM, nil, 100, nil,
-    0, 0, 0, farp.name, true, false)
+  local pad = COORDINATE:NewFromVec2(util.toVec2(farp))
+  local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
+  helipad:InitShape("FARPS")
+  -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
+  helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
+  helipad:SpawnFromCoordinate(pad, 0, farp.name)
+  for _, piece in ipairs(RH.config.farp.services or {}) do
+    local spot = pad:Translate(piece.dist or 40, piece.bearing or 0)
+    local objectName = farp.name .. " " .. piece.label
+    local ok, err = pcall(function()
+      if piece.kind == "vehicle" then
+        dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.bearing)
+      else
+        local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", country.id.USA)
+        if piece.shape then obj:InitShape(piece.shape) end
+        obj:SpawnFromCoordinate(spot, piece.bearing or 0, objectName)
+      end
+    end)
+    if not ok then util.log("FARP piece %s failed: %s", objectName, tostring(err)) end
+  end
   if not STORAGE or not STORAGE.New then return end
   local ok, wh = pcall(STORAGE.New, STORAGE, farp.name)
   if not ok or not wh then return end

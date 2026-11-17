@@ -298,6 +298,17 @@ RH.config = {
     -- Crates and troops load within this distance of the logistics tent.
     loadRadius = 150,
     displayCirclesFor = 60,
+    -- Western FARP services. The pad is the dynamic-spawn heliport. DCS will not rearm, refuel,
+    -- or repair unless these are beside it: Humvee for the radio, M818 for power and rearm,
+    -- fuel depot for fuel, ammo dump for ordnance, tent for repair.
+    services = {
+      { kind = "static", label = "Tent", typeName = "FARP Tent", shape = "PalatkaB", category = "Fortifications", dist = 50, bearing = 180 },
+      { kind = "static", label = "Fuel", typeName = "FARP Fuel Depot", shape = "GSM Rus", category = "Fortifications", dist = 70, bearing = 150 },
+      { kind = "static", label = "Ammo", typeName = "FARP Ammo Dump Coating", shape = "SetkaKP", category = "Fortifications", dist = 70, bearing = 210 },
+      { kind = "static", label = "Windsock", typeName = "Windsock", shape = "H-Windsock_RW", category = "Fortifications", dist = 40, bearing = 0 },
+      { kind = "vehicle", label = "Humvee", typeName = "Hummer", dist = 35, bearing = 100 },
+      { kind = "vehicle", label = "Power", typeName = "M 818", dist = 35, bearing = 260 },
+    },
   },
 
   csar = {
@@ -1097,11 +1108,55 @@ end
 
 -- Construction -------------------------------------------------------------------
 
+function dcs.spawnVehicle(name, typeName, point, headingDeg)
+  local vec = util.toVec2(point)
+  local heading = math.rad(headingDeg or 0)
+  local groupData = {
+    visible = false,
+    hidden = false,
+    task = "Ground Nothing",
+    name = name,
+    x = vec.x,
+    y = vec.y,
+    start_time = 0,
+    route = { points = { { x = vec.x, y = vec.y, type = "Off Road", action = "Off Road", speed = 0 } } },
+    units = {
+      {
+        type = typeName,
+        name = name,
+        skill = "Average",
+        x = vec.x,
+        y = vec.y,
+        heading = heading,
+        playerCanDrive = false,
+        transportable = { randomTransportable = false },
+      },
+    },
+  }
+  return coalition.addGroup(country.id.USA, Group.Category.GROUND, groupData)
+end
+
 function dcs.spawnFarp(farp)
-  -- Empty warehouse. Saved fuel and ammo are written back just below, so a restart does not refill or wipe them.
-  UTILS.SpawnFARPAndFunctionalStatics(farp.name, COORDINATE:NewFromVec2(util.toVec2(farp)), ENUMS.FARPType.FARP,
-    coalition.side.BLUE, country.id.USA, CALLSIGN.FARP.Berlin, 127.5, radio.modulation.AM, nil, 100, nil,
-    0, 0, 0, farp.name, true, false)
+  local pad = COORDINATE:NewFromVec2(util.toVec2(farp))
+  local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
+  helipad:InitShape("FARPS")
+  -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
+  helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
+  helipad:SpawnFromCoordinate(pad, 0, farp.name)
+  for _, piece in ipairs(RH.config.farp.services or {}) do
+    local spot = pad:Translate(piece.dist or 40, piece.bearing or 0)
+    local objectName = farp.name .. " " .. piece.label
+    local ok, err = pcall(function()
+      if piece.kind == "vehicle" then
+        dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.bearing)
+      else
+        local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", country.id.USA)
+        if piece.shape then obj:InitShape(piece.shape) end
+        obj:SpawnFromCoordinate(spot, piece.bearing or 0, objectName)
+      end
+    end)
+    if not ok then util.log("FARP piece %s failed: %s", objectName, tostring(err)) end
+  end
   if not STORAGE or not STORAGE.New then return end
   local ok, wh = pcall(STORAGE.New, STORAGE, farp.name)
   if not ok or not wh then return end
@@ -1344,15 +1399,27 @@ function logistics.buildFarp(point, builtBy)
     airbase = airfield and airfield.name,
     crates = kind == "lc" and -1 or 0,
   })
-  RH.dcs.drawCircle("pending-" .. name, "blue", farp, 250, { 0, 0.7, 1, 1 }, { 0, 0.7, 1, 0.15 }, name .. " (next restart)")
+  RH.dcs.drawCircle("pending-" .. name, "blue", farp, 600, { 0, 0.7, 1, 1 }, { 0, 0.7, 1, 0.15 }, name .. " (next restart)")
+  RH.dcs.smoke(farp, RH.config.markers.smokeColors.green)
   RH.dcs.message("blue", string.format(
-    "%s marked %s. It is built on the next server restart with no fuel and no ammo. Haul both from an airfield that has them in stock.",
-    builtBy or "A pilot", name), 25)
+    "%s marked %s. Restart the mission to build it. It will not appear in the mission editor. The restart spawns the pad on dynamic spawn, plus a tent, Humvee, M818, fuel depot, and ammo dump, with no fuel and no ammo.",
+    builtBy or "A pilot", name), 30)
   RH.dcs.notify("farp_marked", { farp = name, kind = kind })
   return farp
 end
 
 -- Spawn every FARP that was marked on an earlier run. Fuel and ammo come from the save, which is empty the first time.
+function logistics.farpNear(point, radius)
+  local best, bestDist
+  for _, farp in pairs(RH.state.farps) do
+    if (farp.pending or farp.built) and not farp.lc then
+      local d = util.distance(farp, point)
+      if d <= radius and (not bestDist or d < bestDist) then best, bestDist = farp, d end
+    end
+  end
+  return best
+end
+
 function logistics.spawnBuilt()
   logistics.sessionSpawned = {}
   for _, farp in pairs(RH.state.farps) do
@@ -2707,8 +2774,20 @@ function ctld.ensureKitTemplate(name)
   copy.GroupName = name
   copy.Template.name = name
   groups[name] = copy
+  -- SPAWN refuses the copy unless a group of that name is also in the live database.
+  if _DATABASE.GROUPS and not _DATABASE.GROUPS[name] and GROUP and GROUP.Register then
+    _DATABASE.GROUPS[name] = GROUP:Register(name)
+  end
   util.log("crate template %s copied from %s", name, donorName)
   return true
+end
+
+function ctld.buildPoint(unit)
+  if not unit or not unit.IsAlive or not unit:IsAlive() then return nil end
+  local heading = unit:GetHeading() or 0
+  local airframe = RH.config.airframes[unit:GetTypeName()]
+  local length = airframe and airframe.length or 15
+  return unit:GetCoordinate():Translate(length / 2 + 10, (heading + 180) % 360):GetVec2()
 end
 
 local function isLogisticsTent(static)
@@ -2776,7 +2855,7 @@ function ctld.create()
   inst.forcehoverload = false
   inst.CrateDistance = 50
   inst.PackDistance = 50
-  inst.buildtime = 30
+  inst.buildtime = 5
   inst.repairtime = 60
   inst.usesubcats = true
   inst.allowcratepickupagain = true
@@ -2880,6 +2959,17 @@ function ctld.installHooks(inst)
     if wp then Troops:RouteGroundTo(COORDINATE:NewFromVec2(wp), 15, "Off Road", 2) end
   end
 
+  -- Mark the FARP when the countdown starts. The placeholder vehicle spawn can fail, and
+  -- waiting for it is what left the last site unsaved.
+  function inst:OnAfterCratesBuildStarted(From, Event, To, Group, Unit, cargoName)
+    if cargoName ~= RH.config.kits.farp.name then return end
+    local point = ctld.buildPoint(Unit) or (Unit and Unit.GetVec2 and Unit:GetVec2())
+    if not point then return end
+    local player = Unit and Unit.GetPlayerName and Unit:GetPlayerName() or "A pilot"
+    local farp, reason = RH.logistics.buildFarp(point, player)
+    if not farp then ctld.reply(Group, "FARP was not marked: " .. tostring(reason)) end
+  end
+
   function inst:OnAfterCratesBuild(From, Event, To, Group, Unit, Vehicle)
     if not Group or not Vehicle then return end
     local kit = templateKit(Vehicle:GetName())
@@ -2888,15 +2978,15 @@ function ctld.installHooks(inst)
       return
     end
     local point = Vehicle:GetVec2()
-    if Unit and Unit:IsAlive() then
-      local heading = Unit:GetHeading() or 0
-      local airframe = RH.config.airframes[Unit:GetTypeName()]
-      local length = airframe and airframe.length or 15
-      point = Unit:GetCoordinate():Translate(length / 2 + 10, (heading + 180) % 360):GetVec2()
-    end
+    local behind = ctld.buildPoint(Unit)
+    if behind then point = behind end
     local player = Unit and Unit:GetPlayerName() or "A pilot"
     local ok, reason
     if kit == "farp" then
+      if RH.logistics.farpNear(point, 400) then
+        Vehicle:Destroy(false)
+        return
+      end
       ok, reason = RH.logistics.buildFarp(point, player)
     elseif kit == "mash" then
       ok, reason = RH.logistics.buildMash(point, player)

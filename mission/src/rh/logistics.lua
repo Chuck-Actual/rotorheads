@@ -182,15 +182,27 @@ function logistics.buildFarp(point, builtBy)
     airbase = airfield and airfield.name,
     crates = kind == "lc" and -1 or 0,
   })
-  RH.dcs.drawCircle("pending-" .. name, "blue", farp, 250, { 0, 0.7, 1, 1 }, { 0, 0.7, 1, 0.15 }, name .. " (next restart)")
+  RH.dcs.drawCircle("pending-" .. name, "blue", farp, 600, { 0, 0.7, 1, 1 }, { 0, 0.7, 1, 0.15 }, name .. " (next restart)")
+  RH.dcs.smoke(farp, RH.config.markers.smokeColors.green)
   RH.dcs.message("blue", string.format(
-    "%s marked %s. It is built on the next server restart with no fuel and no ammo. Haul both from an airfield that has them in stock.",
-    builtBy or "A pilot", name), 25)
+    "%s marked %s. Restart the mission to build it. It will not appear in the mission editor. The restart spawns the pad on dynamic spawn, plus a tent, Humvee, M818, fuel depot, and ammo dump, with no fuel and no ammo.",
+    builtBy or "A pilot", name), 30)
   RH.dcs.notify("farp_marked", { farp = name, kind = kind })
   return farp
 end
 
 -- Spawn every FARP that was marked on an earlier run. Fuel and ammo come from the save, which is empty the first time.
+function logistics.farpNear(point, radius)
+  local best, bestDist
+  for _, farp in pairs(RH.state.farps) do
+    if (farp.pending or farp.built) and not farp.lc then
+      local d = util.distance(farp, point)
+      if d <= radius and (not bestDist or d < bestDist) then best, bestDist = farp, d end
+    end
+  end
+  return best
+end
+
 function logistics.spawnBuilt()
   logistics.sessionSpawned = {}
   for _, farp in pairs(RH.state.farps) do

@@ -58,8 +58,20 @@ function ctld.ensureKitTemplate(name)
   copy.GroupName = name
   copy.Template.name = name
   groups[name] = copy
+  -- SPAWN refuses the copy unless a group of that name is also in the live database.
+  if _DATABASE.GROUPS and not _DATABASE.GROUPS[name] and GROUP and GROUP.Register then
+    _DATABASE.GROUPS[name] = GROUP:Register(name)
+  end
   util.log("crate template %s copied from %s", name, donorName)
   return true
+end
+
+function ctld.buildPoint(unit)
+  if not unit or not unit.IsAlive or not unit:IsAlive() then return nil end
+  local heading = unit:GetHeading() or 0
+  local airframe = RH.config.airframes[unit:GetTypeName()]
+  local length = airframe and airframe.length or 15
+  return unit:GetCoordinate():Translate(length / 2 + 10, (heading + 180) % 360):GetVec2()
 end
 
 local function isLogisticsTent(static)
@@ -127,7 +139,7 @@ function ctld.create()
   inst.forcehoverload = false
   inst.CrateDistance = 50
   inst.PackDistance = 50
-  inst.buildtime = 30
+  inst.buildtime = 5
   inst.repairtime = 60
   inst.usesubcats = true
   inst.allowcratepickupagain = true
@@ -231,6 +243,17 @@ function ctld.installHooks(inst)
     if wp then Troops:RouteGroundTo(COORDINATE:NewFromVec2(wp), 15, "Off Road", 2) end
   end
 
+  -- Mark the FARP when the countdown starts. The placeholder vehicle spawn can fail, and
+  -- waiting for it is what left the last site unsaved.
+  function inst:OnAfterCratesBuildStarted(From, Event, To, Group, Unit, cargoName)
+    if cargoName ~= RH.config.kits.farp.name then return end
+    local point = ctld.buildPoint(Unit) or (Unit and Unit.GetVec2 and Unit:GetVec2())
+    if not point then return end
+    local player = Unit and Unit.GetPlayerName and Unit:GetPlayerName() or "A pilot"
+    local farp, reason = RH.logistics.buildFarp(point, player)
+    if not farp then ctld.reply(Group, "FARP was not marked: " .. tostring(reason)) end
+  end
+
   function inst:OnAfterCratesBuild(From, Event, To, Group, Unit, Vehicle)
     if not Group or not Vehicle then return end
     local kit = templateKit(Vehicle:GetName())
@@ -239,15 +262,15 @@ function ctld.installHooks(inst)
       return
     end
     local point = Vehicle:GetVec2()
-    if Unit and Unit:IsAlive() then
-      local heading = Unit:GetHeading() or 0
-      local airframe = RH.config.airframes[Unit:GetTypeName()]
-      local length = airframe and airframe.length or 15
-      point = Unit:GetCoordinate():Translate(length / 2 + 10, (heading + 180) % 360):GetVec2()
-    end
+    local behind = ctld.buildPoint(Unit)
+    if behind then point = behind end
     local player = Unit and Unit:GetPlayerName() or "A pilot"
     local ok, reason
     if kit == "farp" then
+      if RH.logistics.farpNear(point, 400) then
+        Vehicle:Destroy(false)
+        return
+      end
       ok, reason = RH.logistics.buildFarp(point, player)
     elseif kit == "mash" then
       ok, reason = RH.logistics.buildMash(point, player)

@@ -107,6 +107,17 @@ RH.config = {
     -- Crates and troops load within this distance of the logistics tent.
     loadRadius = 150,
     displayCirclesFor = 60,
+    -- Western FARP services. The pad is the dynamic-spawn heliport. DCS will not rearm, refuel,
+    -- or repair unless these are beside it: Humvee for the radio, M818 for power and rearm,
+    -- fuel depot for fuel, ammo dump for ordnance, tent for repair.
+    services = {
+      { kind = "static", label = "Tent", typeName = "FARP Tent", shape = "PalatkaB", category = "Fortifications", dist = 50, bearing = 180 },
+      { kind = "static", label = "Fuel", typeName = "FARP Fuel Depot", shape = "GSM Rus", category = "Fortifications", dist = 70, bearing = 150 },
+      { kind = "static", label = "Ammo", typeName = "FARP Ammo Dump Coating", shape = "SetkaKP", category = "Fortifications", dist = 70, bearing = 210 },
+      { kind = "static", label = "Windsock", typeName = "Windsock", shape = "H-Windsock_RW", category = "Fortifications", dist = 40, bearing = 0 },
+      { kind = "vehicle", label = "Humvee", typeName = "Hummer", dist = 35, bearing = 100 },
+      { kind = "vehicle", label = "Power", typeName = "M 818", dist = 35, bearing = 260 },
+    },
   },
 
   csar = {

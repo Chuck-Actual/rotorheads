@@ -71,6 +71,17 @@ T.test("building within 1 NM of a friendly airfield makes an LC", function()
   T.ok(why:find("1 mile"), why)
 end)
 
+T.test("a FARP brings the services DCS needs to rearm and refuel", function()
+  T.fresh()
+  local types = {}
+  for _, piece in ipairs(RH.config.farp.services) do types[piece.typeName] = true end
+  T.ok(types["FARP Tent"])
+  T.ok(types["FARP Fuel Depot"])
+  T.ok(types["FARP Ammo Dump Coating"])
+  T.ok(types["Hummer"])
+  T.ok(types["M 818"])
+end)
+
 T.test("a marked FARP waits for the next restart and then spawns empty", function()
   setup()
   local mile = RH.config.farp.minSeparation
