@@ -18,8 +18,7 @@ function chat.handle(playerName, text)
   elseif cmd == "-farps" then
     local lines = {}
     for _, farp in ipairs(RH.logistics.farps()) do
-      table.insert(lines, string.format("%s%s: %s crates", farp.name, farp.lc and " (LC)" or "",
-        RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
+      table.insert(lines, string.format("%s%s: %s", farp.name, farp.lc and " (LC)" or "", RH.logistics.stockText(farp)))
     end
     RH.dcs.message("blue", #lines > 0 and table.concat(lines, "\n") or "No FARPs yet.", 20)
   elseif cmd == "-mash" then

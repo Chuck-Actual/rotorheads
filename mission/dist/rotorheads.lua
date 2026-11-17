@@ -281,12 +281,17 @@ RH.config = {
   },
 
   farp = {
-    cratesForFarp = 9,
-    farpCrateMass = 1000,
+    -- Testing build: six of the same small CDS crates make one FARP, so a Chinook can haul the whole kit.
+    cratesForFarp = 6,
+    farpCrateMass = 400,
+    -- A new FARP has to sit at least a mile from every FARP and every Logistics Center.
+    minSeparation = 1609.344,
+    -- A field FARP this close to an airfield that still has no Logistics Center is refused.
     minDistanceFarp = 15 * 1852,
-    minDistanceLC = 5 * 1852,
+    -- Building inside this radius of an airfield reference point creates that airfield's Logistics Center.
     lcAirfieldRadius = 1 * 1852,
-    noBuildRadiusFromFarp = 300,
+    -- A tent already placed on the airfield is the Logistics Center even if the zone sits off the beacon.
+    placedLcRadius = 5 * 1852,
     startingCrates = 40,
     maxCrates = 80,
     zoneRadius = 250,
@@ -532,6 +537,7 @@ function persistence.load()
 end
 
 function persistence.save()
+  if RH.logistics and RH.logistics.captureStocks then RH.logistics.captureStocks() end
   RH.state.savedAt = RH.dcs.wallclock()
   local ok = RH.dcs.writeFile(persistence.path("campaign.lua"), util.serialize(RH.state))
   if ok then util.log("campaign saved") end
@@ -1092,10 +1098,49 @@ end
 -- Construction -------------------------------------------------------------------
 
 function dcs.spawnFarp(farp)
-  local isLC = farp.lc
+  -- Empty warehouse. Saved fuel and ammo are written back just below, so a restart does not refill or wipe them.
   UTILS.SpawnFARPAndFunctionalStatics(farp.name, COORDINATE:NewFromVec2(util.toVec2(farp)), ENUMS.FARPType.FARP,
     coalition.side.BLUE, country.id.USA, CALLSIGN.FARP.Berlin, 127.5, radio.modulation.AM, nil, 100, nil,
-    isLC and 100 or 10, isLC and 100 or 10, isLC and 20 or 4, farp.name, true, false)
+    0, 0, 0, farp.name, true, false)
+  if not STORAGE or not STORAGE.New then return end
+  local ok, wh = pcall(STORAGE.New, STORAGE, farp.name)
+  if not ok or not wh then return end
+  for key, amount in pairs(farp.liquids or {}) do
+    local id = STORAGE.Liquid and STORAGE.Liquid[key]
+    if id and type(amount) == "number" and amount > 0 and wh.SetLiquid then wh:SetLiquid(id, amount) end
+  end
+  for item, amount in pairs(farp.ammoItems or {}) do
+    if type(amount) == "number" and amount > 0 and wh.SetItem then wh:SetItem(item, amount) end
+  end
+end
+
+-- Read the live warehouse so the next restart spawns the same fuel and ammo.
+function dcs.captureFarpStock(farp)
+  if not STORAGE or not STORAGE.New then return false end
+  local ok, wh = pcall(STORAGE.New, STORAGE, farp.name)
+  if not ok or not wh or not wh.GetLiquidAmount then return false end
+  local liquids = {}
+  for key, id in pairs(STORAGE.Liquid or {}) do
+    local okN, n = pcall(function() return wh:GetLiquidAmount(id) end)
+    if okN and type(n) == "number" then liquids[key] = n end
+  end
+  if next(liquids) then farp.liquids = liquids end
+  local items = {}
+  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
+  if weapons and wh.GetItemAmount then
+    for _, group in pairs(weapons) do
+      if type(group) == "table" then
+        for _, item in pairs(group) do
+          if type(item) == "string" then
+            local okN, n = pcall(function() return wh:GetItemAmount(item) end)
+            if okN and type(n) == "number" and n > 0 then items[item] = n end
+          end
+        end
+      end
+    end
+  end
+  farp.ammoItems = items
+  return true
 end
 
 function dcs.spawnMash(name, point)
@@ -1152,7 +1197,10 @@ function logistics.register(name, point, opts)
     built = opts.built or false,
     airbase = opts.airbase,
     zoneRadius = opts.zoneRadius,
-    crates = opts.lc and -1 or (opts.crates or fcfg().startingCrates),
+    pending = opts.pending or false,
+    crates = opts.crates or (opts.lc and -1 or fcfg().startingCrates),
+    liquids = opts.liquids,
+    ammoItems = opts.ammoItems,
   }
   RH.state.farps[name] = farp
   return farp
@@ -1163,10 +1211,32 @@ function logistics.discoverPlaced()
   for _, zone in ipairs(RH.dcs.zonesWithPrefix(prefix)) do
     local airbase = logistics.airfieldNear(zone.point, fcfg().lcAirfieldRadius)
     logistics.register(zone.name, zone.point, {
-      lc = airbase ~= nil,
+      lc = airbase ~= nil and airbase.coalition ~= "red",
       airbase = airbase and airbase.name,
       zoneRadius = zone.radius,
     })
+  end
+  logistics.refreshPlacedCenters()
+end
+
+-- A mission-editor logistics tent on an airfield is that airfield's Logistics Center.
+-- Player-built FARPs are left alone. An existing save is promoted when the tent is close enough.
+function logistics.refreshPlacedCenters()
+  local radius = fcfg().placedLcRadius or fcfg().lcAirfieldRadius
+  for _, farp in pairs(RH.state.farps) do
+    if not farp.built and not farp.pending then
+      local points = { { x = farp.x, y = farp.y } }
+      for _, lp in ipairs(farp.loadPoints or {}) do table.insert(points, lp) end
+      for _, p in ipairs(points) do
+        local ab = logistics.airfieldNear(p, radius)
+        if ab and ab.coalition ~= "red" then
+          farp.lc = true
+          farp.airbase = ab.name
+          farp.crates = -1
+          break
+        end
+      end
+    end
   end
 end
 
@@ -1216,49 +1286,38 @@ function logistics.returnCrates(farp, n)
   return added
 end
 
--- Construction rules from the wiki:
---  * an LC is a FARP built within 1 NM of an airfield reference point, at most one per airfield;
---  * FARPs must be 15 NM from any FARP and 5 NM from any LC;
---  * FARPs must not be within 15 NM of an airfield that has no LC (it would block that LC forever);
---  * nothing can be built within 300 m of an existing FARP.
+local function airfieldHasLC(airfieldName)
+  for _, farp in pairs(RH.state.farps) do
+    if farp.lc and farp.airbase == airfieldName then return true end
+  end
+  return false
+end
+
+-- Construction, testing rules:
+--  * the first site within 1 NM of a friendly airfield becomes that airfield's Logistics Center;
+--  * every other site must be at least 1 mile from every FARP and every Logistics Center;
+--  * a site within 15 NM of an airfield that still has no Logistics Center is refused.
 function logistics.validateFarpSite(point)
   local airfield = logistics.airfieldNear(point, fcfg().lcAirfieldRadius)
-  for _, farp in pairs(RH.state.farps) do
-    local d = util.distance(farp, point)
-    if d < fcfg().noBuildRadiusFromFarp then
-      return false, "too close to " .. farp.name
-    end
+  if airfield and airfield.coalition == "red" then
+    return false, airfield.name .. " is still held by REDFOR"
   end
-
-  if airfield then
-    if airfield.coalition == "red" then return false, airfield.name .. " is still held by REDFOR" end
-    for _, farp in pairs(RH.state.farps) do
-      if farp.lc and farp.airbase == airfield.name then
-        return false, airfield.name .. " already has a Logistics Center"
-      end
-    end
+  if airfield and not airfieldHasLC(airfield.name) then
     return true, "lc", airfield
   end
 
+  local mile = fcfg().minSeparation
   for _, farp in pairs(RH.state.farps) do
     local d = util.distance(farp, point)
-    if farp.lc and d < fcfg().minDistanceLC then
-      return false, string.format("%.1f NM from Logistics Center %s (needs 5 NM)", d / util.NM, farp.name)
-    end
-    if not farp.lc and d < fcfg().minDistanceFarp then
-      return false, string.format("%.1f NM from FARP %s (needs 15 NM)", d / util.NM, farp.name)
+    if d < mile then
+      local what = farp.lc and "Logistics Center" or "FARP"
+      return false, string.format("%.2f miles from %s %s (needs 1 mile)", d / mile, what, farp.name)
     end
   end
 
   for _, ab in ipairs(RH.dcs.airbases()) do
-    if ab.kind == "airdrome" and util.distance(ab.point, point) < fcfg().minDistanceFarp then
-      local hasLC = false
-      for _, farp in pairs(RH.state.farps) do
-        if farp.lc and farp.airbase == ab.name then hasLC = true end
-      end
-      if not hasLC then
-        return false, "within 15 NM of " .. ab.name .. ", which has no Logistics Center yet"
-      end
+    if ab.kind == "airdrome" and util.distance(ab.point, point) < fcfg().minDistanceFarp and not airfieldHasLC(ab.name) then
+      return false, "within 15 NM of " .. ab.name .. ", which has no Logistics Center yet"
     end
   end
   return true, "farp"
@@ -1267,28 +1326,70 @@ end
 function logistics.nextFarpName(kind, airfield)
   if kind == "lc" then return "LC " .. airfield.name end
   local n = 1
-  for _, farp in pairs(RH.state.farps) do if farp.built and not farp.lc then n = n + 1 end end
+  for _, farp in pairs(RH.state.farps) do
+    if not farp.lc and (farp.built or farp.pending) then n = n + 1 end
+  end
   return string.format("FARP %02d", n)
 end
 
--- Builds a FARP/LC at a validated point. Returns the FARP record or nil, reason.
+-- Marks the site. DCS cannot stand up a working FARP in the running mission, so it appears on the next restart.
 function logistics.buildFarp(point, builtBy)
   local ok, kind, airfield = logistics.validateFarpSite(point)
   if not ok then return nil, kind end
   local name = logistics.nextFarpName(kind, airfield)
-  local farp = logistics.register(name, point, { lc = kind == "lc", built = true, airbase = airfield and airfield.name, crates = 0 })
-  RH.dcs.spawnFarp(farp)
-  RH.dcs.message("blue", string.format("%s built %s. It will need crates and fuel delivered.", builtBy or "A pilot", name), 20)
-  RH.dcs.notify("farp_built", { farp = name, kind = kind })
-  if RH.ctld and RH.ctld.addFarpZone then RH.ctld.addFarpZone(farp) end
+  local farp = logistics.register(name, point, {
+    lc = kind == "lc",
+    built = false,
+    pending = true,
+    airbase = airfield and airfield.name,
+    crates = kind == "lc" and -1 or 0,
+  })
+  RH.dcs.drawCircle("pending-" .. name, "blue", farp, 250, { 0, 0.7, 1, 1 }, { 0, 0.7, 1, 0.15 }, name .. " (next restart)")
+  RH.dcs.message("blue", string.format(
+    "%s marked %s. It is built on the next server restart with no fuel and no ammo. Haul both from an airfield that has them in stock.",
+    builtBy or "A pilot", name), 25)
+  RH.dcs.notify("farp_marked", { farp = name, kind = kind })
   return farp
+end
+
+-- Spawn every FARP that was marked on an earlier run. Fuel and ammo come from the save, which is empty the first time.
+function logistics.spawnBuilt()
+  logistics.sessionSpawned = {}
+  for _, farp in pairs(RH.state.farps) do
+    if farp.pending or farp.built then
+      RH.dcs.spawnFarp(farp)
+      logistics.sessionSpawned[farp.name] = true
+      farp.pending = false
+      farp.built = true
+      RH.dcs.removeDrawing("pending-" .. farp.name)
+    end
+  end
+end
+
+function logistics.captureStocks()
+  if not RH.dcs.captureFarpStock then return end
+  for name in pairs(logistics.sessionSpawned or {}) do
+    local farp = RH.state.farps[name]
+    if farp then RH.dcs.captureFarpStock(farp) end
+  end
+end
+
+function logistics.stockText(farp)
+  if farp.pending then return "marked, builds on next restart with no fuel or ammo" end
+  if not farp.built then
+    return (logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)) .. " crates"
+  end
+  local fuel = farp.liquids and farp.liquids.JETFUEL or 0
+  local ammo = 0
+  for _, n in pairs(farp.ammoItems or {}) do ammo = ammo + n end
+  return string.format("fuel %d, ammo %d", fuel, ammo)
 end
 
 function logistics.showFarpCircles()
   local ids = {}
   for _, farp in pairs(RH.state.farps) do
     local id = "farp?-" .. farp.name
-    local radius = farp.lc and fcfg().minDistanceLC or fcfg().minDistanceFarp
+    local radius = fcfg().minSeparation
     RH.dcs.drawCircle(id, "blue", farp, radius, { 0, 0.4, 1, 1 }, { 0, 0.4, 1, 0.12 }, farp.name)
     table.insert(ids, id)
   end
@@ -1432,9 +1533,7 @@ function logistics.start()
   for name, m in pairs(RH.state.mashes) do
     RH.dcs.spawnMash(name, m)
   end
-  for _, farp in pairs(RH.state.farps) do
-    if farp.built then RH.dcs.spawnFarp(farp) end
-  end
+  logistics.spawnBuilt()
   for name, bo in pairs(RH.state.blueOutposts) do
     RH.dcs.drawCircle("blueoutpost-" .. name, "blue", bo, bo.radius, { 0, 0.4, 1, 1 }, { 0, 0.4, 1, 0.08 }, name)
   end
@@ -2167,7 +2266,7 @@ local util = RH.util
 --   -illumination        illumination flares over the mark for several minutes
 --   -smoke,<color>       smoke at the mark (green, red, orange, blue, white); you must be within 15 km
 --   -wpzone              deployed troops nearby walk to this mark instead of charging the enemy
---   -farp?               shows 15 NM (FARP) / 5 NM (LC) no-build circles for a minute
+--   -farp?               shows the 1 mile no-build circle around every FARP and Logistics Center
 --   -extract             downed pilots within 4 km (up to 4) walk to this mark for pickup
 local markers = { wpzones = {}, lastFarpQuery = -math.huge }
 RH.markers = markers
@@ -2682,6 +2781,7 @@ function ctld.create()
   if #notes > 0 then
     RH.dcs.message("blue", "Logistics load zones, 150 m, shown in blue for 60 seconds: " .. table.concat(notes, ", "), 25)
   end
+  if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)
   inst:__Start(2)
   if inst.enableLoadSave then inst:__Load(10) end
@@ -3041,12 +3141,6 @@ function csar.positionOf(pilot)
     if ok and v then pilot.rhPos = { x = v.x, y = v.y } end
   end
   return pilot.rhPos
-end
-
-function csar.runFor(groupName)
-  for key, run in pairs(csar.runs or {}) do
-    if run.groupName == groupName then return key, run end
-  end
 end
 
 -- Any blue player helicopter, including the one you took after crashing the first.
@@ -3497,8 +3591,7 @@ function chat.handle(playerName, text)
   elseif cmd == "-farps" then
     local lines = {}
     for _, farp in ipairs(RH.logistics.farps()) do
-      table.insert(lines, string.format("%s%s: %s crates", farp.name, farp.lc and " (LC)" or "",
-        RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
+      table.insert(lines, string.format("%s%s: %s", farp.name, farp.lc and " (LC)" or "", RH.logistics.stockText(farp)))
     end
     RH.dcs.message("blue", #lines > 0 and table.concat(lines, "\n") or "No FARPs yet.", 20)
   elseif cmd == "-mash" then

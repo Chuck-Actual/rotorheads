@@ -132,6 +132,7 @@ function ctld.create()
   if #notes > 0 then
     RH.dcs.message("blue", "Logistics load zones, 150 m, shown in blue for 60 seconds: " .. table.concat(notes, ", "), 25)
   end
+  if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)
   inst:__Start(2)
   if inst.enableLoadSave then inst:__Load(10) end

@@ -85,6 +85,7 @@ function persistence.load()
 end
 
 function persistence.save()
+  if RH.logistics and RH.logistics.captureStocks then RH.logistics.captureStocks() end
   RH.state.savedAt = RH.dcs.wallclock()
   local ok = RH.dcs.writeFile(persistence.path("campaign.lua"), util.serialize(RH.state))
   if ok then util.log("campaign saved") end

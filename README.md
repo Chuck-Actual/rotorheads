@@ -20,9 +20,10 @@ public); it rebuilds the mechanics described in their wiki on top of the open-so
 - **Logistics** through MOOSE CTLD: troop squads sized per airframe, crates with real weights, sling loading,
   CH-47 dynamic cargo, repacking to repair and rearm. Each FARP has its own crate stock, while Logistics
   Centers and ships are unlimited.
-- **Construction**: FARPs (9 crates, 15 NM apart, 5 NM from LCs), Logistics Centers (a FARP within 1 NM of
-  an airfield), MASHes (4 crates, inside a blue zone, 16 km apart), blue outposts, and 30-minute "Fat Cow"
-  repair points.
+- **Construction**: FARPs (6 CDS crates, at least 1 mile from any FARP or Logistics Center, built on the
+  next restart with no fuel or ammo; fuel and ammo then persist), Logistics Centers (the tent at a friendly
+  airfield, or a FARP built within 1 NM of one), MASHes (4 crates, inside a blue zone, 16 km apart),
+  blue outposts, and 30-minute "Fat Cow" repair points.
 - **Lives and CSAR**: 3 lives on attack and fixed-wing airframes, unlimited on utility helicopters. A life is
   lost if you die, eject, or leave the aircraft away from a base, and comes back after 24 hours or when your
   pilot is rescued to a MASH or airfield. MASHes hold 30 patients; transport tasks empty them. Friendly

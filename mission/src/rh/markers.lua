@@ -6,7 +6,7 @@ local util = RH.util
 --   -illumination        illumination flares over the mark for several minutes
 --   -smoke,<color>       smoke at the mark (green, red, orange, blue, white); you must be within 15 km
 --   -wpzone              deployed troops nearby walk to this mark instead of charging the enemy
---   -farp?               shows 15 NM (FARP) / 5 NM (LC) no-build circles for a minute
+--   -farp?               shows the 1 mile no-build circle around every FARP and Logistics Center
 --   -extract             downed pilots within 4 km (up to 4) walk to this mark for pickup
 local markers = { wpzones = {}, lastFarpQuery = -math.huge }
 RH.markers = markers

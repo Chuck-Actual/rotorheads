@@ -90,12 +90,17 @@ RH.config = {
   },
 
   farp = {
-    cratesForFarp = 9,
-    farpCrateMass = 1000,
+    -- Testing build: six of the same small CDS crates make one FARP, so a Chinook can haul the whole kit.
+    cratesForFarp = 6,
+    farpCrateMass = 400,
+    -- A new FARP has to sit at least a mile from every FARP and every Logistics Center.
+    minSeparation = 1609.344,
+    -- A field FARP this close to an airfield that still has no Logistics Center is refused.
     minDistanceFarp = 15 * 1852,
-    minDistanceLC = 5 * 1852,
+    -- Building inside this radius of an airfield reference point creates that airfield's Logistics Center.
     lcAirfieldRadius = 1 * 1852,
-    noBuildRadiusFromFarp = 300,
+    -- A tent already placed on the airfield is the Logistics Center even if the zone sits off the beacon.
+    placedLcRadius = 5 * 1852,
     startingCrates = 40,
     maxCrates = 80,
     zoneRadius = 250,

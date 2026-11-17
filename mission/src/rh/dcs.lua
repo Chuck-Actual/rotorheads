@@ -538,10 +538,49 @@ end
 -- Construction -------------------------------------------------------------------
 
 function dcs.spawnFarp(farp)
-  local isLC = farp.lc
+  -- Empty warehouse. Saved fuel and ammo are written back just below, so a restart does not refill or wipe them.
   UTILS.SpawnFARPAndFunctionalStatics(farp.name, COORDINATE:NewFromVec2(util.toVec2(farp)), ENUMS.FARPType.FARP,
     coalition.side.BLUE, country.id.USA, CALLSIGN.FARP.Berlin, 127.5, radio.modulation.AM, nil, 100, nil,
-    isLC and 100 or 10, isLC and 100 or 10, isLC and 20 or 4, farp.name, true, false)
+    0, 0, 0, farp.name, true, false)
+  if not STORAGE or not STORAGE.New then return end
+  local ok, wh = pcall(STORAGE.New, STORAGE, farp.name)
+  if not ok or not wh then return end
+  for key, amount in pairs(farp.liquids or {}) do
+    local id = STORAGE.Liquid and STORAGE.Liquid[key]
+    if id and type(amount) == "number" and amount > 0 and wh.SetLiquid then wh:SetLiquid(id, amount) end
+  end
+  for item, amount in pairs(farp.ammoItems or {}) do
+    if type(amount) == "number" and amount > 0 and wh.SetItem then wh:SetItem(item, amount) end
+  end
+end
+
+-- Read the live warehouse so the next restart spawns the same fuel and ammo.
+function dcs.captureFarpStock(farp)
+  if not STORAGE or not STORAGE.New then return false end
+  local ok, wh = pcall(STORAGE.New, STORAGE, farp.name)
+  if not ok or not wh or not wh.GetLiquidAmount then return false end
+  local liquids = {}
+  for key, id in pairs(STORAGE.Liquid or {}) do
+    local okN, n = pcall(function() return wh:GetLiquidAmount(id) end)
+    if okN and type(n) == "number" then liquids[key] = n end
+  end
+  if next(liquids) then farp.liquids = liquids end
+  local items = {}
+  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
+  if weapons and wh.GetItemAmount then
+    for _, group in pairs(weapons) do
+      if type(group) == "table" then
+        for _, item in pairs(group) do
+          if type(item) == "string" then
+            local okN, n = pcall(function() return wh:GetItemAmount(item) end)
+            if okN and type(n) == "number" and n > 0 then items[item] = n end
+          end
+        end
+      end
+    end
+  end
+  farp.ammoItems = items
+  return true
 end
 
 function dcs.spawnMash(name, point)
