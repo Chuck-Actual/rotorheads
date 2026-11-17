@@ -56,15 +56,23 @@ end
 
 local function findSource()
   local tried = {}
-  local function add(path)
-    if type(path) == "string" and path ~= "" then tried[#tried + 1] = path end
+  local running = {}
+  local function add(list, path)
+    if type(path) == "string" and path ~= "" then
+      list[#list + 1] = path
+      tried[#tried + 1] = path
+    end
   end
   local ok, name = pcall(DCS.getMissionFilename)
   if ok and type(name) == "string" and name ~= "" then
     if not name:match("^%a:[/\\]") and not name:match("^\\\\") then
-      add(withSlash(lfs.currentdir()) .. name)
+      add(running, withSlash(lfs.currentdir()) .. name)
     end
-    add(name)
+    add(running, name)
+  end
+  -- The mission that is actually running wins, including RH_Editor.miz after a hand edit.
+  for _, path in ipairs(running) do
+    if lfs.attributes(path) then return path, tried end
   end
   local home = os.getenv("USERPROFILE") or ""
   local roots = { withSlash(lfs.writedir()) }
@@ -74,10 +82,9 @@ local function findSource()
     roots[#roots + 1] = home .. "\\Saved Games\\DCS.openbeta\\"
   end
   for _, root in ipairs(roots) do
-    add(root .. "Missions\\RH Test.miz")
-  end
-  for _, path in ipairs(tried) do
-    if not path:lower():match("rh_editor%.miz$") and lfs.attributes(path) then return path, tried end
+    local path = root .. "Missions\\RH Test.miz"
+    tried[#tried + 1] = path
+    if lfs.attributes(path) then return path, tried end
   end
   return nil, tried
 end
@@ -185,13 +192,16 @@ local function exportEditor()
     writeNote(source, "Editor mission was not built.\r\n" .. tostring(packerErr))
     return
   end
-  local dest = source:match("^(.*)[/\\][^/\\]+$") .. "\\RH_Editor.miz"
+  local dir, filename = source:match("^(.*)[/\\]([^/\\]+)$")
+  -- The hosted file stays locked until the server stops, so the editor copy is a different file.
+  local destName = filename:lower() == "rh_editor.miz" and "RH_Editor_latest.miz" or "RH_Editor.miz"
+  local dest = dir .. "\\" .. destName
   local ok, err = packer.exportText(source, worldText, dest)
   if ok then
-    writeNote(source, "Wrote " .. dest .. "\r\nFrom " .. source .. "\r\nOpen RH_Editor.miz in the Mission Editor. The mission you launched is left as it is.")
+    writeNote(source, "Wrote " .. dest .. "\r\nFrom " .. source .. "\r\nStop the server, then open this file in the Mission Editor. The mission that is running is left as it is.")
     if not RHHook.told then
       RHHook.told = true
-      net.send_chat("Rotorheads wrote RH_Editor.miz next to your mission. Open that file in the Mission Editor.", true)
+      net.send_chat("Rotorheads saved " .. destName .. ". Stop the server before opening it in the Mission Editor.", true)
     end
   else
     writeNote(source, "Editor mission failed.\r\n" .. tostring(err) .. "\r\nSource " .. source .. "\r\nDestination " .. dest)

@@ -150,11 +150,12 @@ live in the simulation until they are written out. Every 30 seconds, and again w
 records ground units, ships, statics, and FARP warehouses into `world.lua`. The next launch puts back anything
 that is missing, and removes an editor-placed ground unit that was destroyed.
 
-While the mission is running, the server hook writes `Saved Games\DCS\Missions\RH_Editor.miz` beside
-`RH Test.miz`. The result of the last attempt is `Saved Games\DCS\Missions\Rotorheads\last_export.txt`.
-Open `RH_Editor.miz` in the Mission Editor. The mission you launched is left unchanged. DCS's own Esc,
-Save Mission writes a second checkpoint, but save it under a new name. Saving on top of the mission that
-is open leaves a stuck `RH Test.miz.writing` file.
+While the mission is hosted, the server hook writes `Saved Games\DCS\Missions\RH_Editor.miz` beside
+`RH Test.miz`. Stop the server before opening that file in the Mission Editor. One DCS install cannot
+host and edit at the same time. If the server was started from `RH_Editor.miz`, the new copy is
+`RH_Editor_latest.miz`, because the file being hosted stays locked. The result of the last attempt is
+`Saved Games\DCS\Missions\Rotorheads\last_export.txt`. DCS's own Esc, Save Mission has to use a new
+filename. Saving on top of the mission that is open leaves a stuck `.writing` file.
 
 Re-run `tools\windows\install.ps1` after this update so the hook that writes `RH_Editor.miz` is installed.
 DCS has to be restarted before a new hook loads.
