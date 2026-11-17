@@ -71,21 +71,6 @@ function csar.installHooks(inst)
     return false
   end
 
-  -- A hidden pilot has no group. Keep him on the books. Deleting the model must not count as killed.
-  function inst:_CheckDownedPilotTable()
-    local keep = {}
-    for index, entry in pairs(self.downedPilots or {}) do
-      if entry.alive then
-        if not csar.groupAlive(entry.group) then
-          entry.group = nil
-          entry.rhHidden = true
-        end
-        keep[index] = entry
-      end
-    end
-    self.downedPilots = keep
-  end
-
   -- A fresh alias every time. Spawning several pilots in one moment was reusing a name, so only one soldier appeared.
   csar.spawnSerial = 0
   function inst:_SpawnPilotInField(country, point, frequency, wetfeet)
@@ -95,14 +80,6 @@ function csar.installHooks(inst)
     local alias = string.format("RH Pilot %d", csar.spawnSerial)
     local group = SPAWN:NewWithAlias(template, alias):InitCoalition(self.coalition):InitCountry(country):InitDelayOff():SpawnFromCoordinate(point)
     return group, alias
-  end
-
-  local stockTrack = inst._CreateDownedPilotTrack
-  function inst:_CreateDownedPilotTrack(...)
-    stockTrack(self, ...)
-    for _, pilot in pairs(self.downedPilots or {}) do
-      if pilot.alive then csar.positionOf(pilot) end
-    end
   end
 
   -- Drop the pilot only inside the MASH zone. Landing at the airfield keeps him aboard.
@@ -262,111 +239,7 @@ function csar.positionOf(pilot)
   return pilot.rhPos
 end
 
-function csar.runFor(groupName)
-  for key, run in pairs(csar.runs or {}) do
-    if run.groupName == groupName then return key, run end
-  end
-end
-
-function csar.hidePilot(inst, pilot)
-  if not pilot or pilot.rhHidden or csar.runFor(pilot.name) then return end
-  -- Leave the soldier in the world if we cannot put him back later.
-  if not csar.captureTemplate(inst) then return end
-  local pos = csar.positionOf(pilot)
-  if not pos then return end
-  if csar.groupAlive(pilot.group) then
-    pilot.group:Destroy(false)
-  end
-  pilot.group = nil
-  pilot.rhHidden = true
-end
-
-function csar.captureTemplate(inst)
-  if csar.pilotTemplate then return true end
-  local entry = _DATABASE and _DATABASE.Templates and _DATABASE.Templates.Groups[inst.template]
-  if not entry or not entry.Template then return false end
-  csar.pilotTemplate = UTILS.DeepCopy(entry.Template)
-  csar.pilotCountry = entry.Template.CountryID or inst.countryblue
-  csar.pilotCategory = entry.Template.CategoryID or Group.Category.GROUND
-  return true
-end
-
-function csar.showPilot(inst, pilot)
-  if not pilot then return end
-  if csar.groupAlive(pilot.group) then
-    pilot.rhHidden = false
-    return pilot.group
-  end
-  local pos = pilot.rhPos
-  if not pos then return end
-  -- A spawn can report "not alive" for a moment. Keep that group instead of throwing it away.
-  if pilot.group and pilot.rhShownAt and timer.getTime() - pilot.rhShownAt < 5 then
-    return pilot.group
-  end
-  pilot.group = nil
-  local group, err = csar.spawnAt(inst, pos, pilot.wetfeet)
-  if not group then
-    pilot.rhHidden = true
-    local key = tostring(pilot.index or pilot.name)
-    csar.spawnWarned = csar.spawnWarned or {}
-    if not csar.spawnWarned[key] then
-      csar.spawnWarned[key] = true
-      RH.util.log("csar spawn failed: %s", tostring(err))
-      RH.dcs.message("blue", "CSAR could not put the pilot back on the ground: " .. tostring(err), 15)
-    end
-    return nil
-  end
-  if inst._AddSpecialOptions then inst:_AddSpecialOptions(group) end
-  pilot.group = group
-  pilot.name = group:GetName() or pilot.name
-  pilot.rhHidden = false
-  pilot.alive = true
-  pilot.rhShownAt = timer.getTime()
-  return group
-end
-
-function csar.spawnAt(inst, pos, wetfeet)
-  if not csar.captureTemplate(inst) then return nil, "downed-pilot template was not found" end
-  csar.spawnSerial = (csar.spawnSerial or 0) + 1
-  local id = csar.spawnSerial
-  local tpl = UTILS.DeepCopy(csar.pilotTemplate)
-  local gname = string.format("RH Pilot %d", id)
-  local anchor = tpl.units and tpl.units[1]
-  if not anchor then return nil, "template has no units" end
-  local bx, by = anchor.x or 0, anchor.y or 0
-  tpl.name = gname
-  tpl.groupId = nil
-  tpl.lateActivation = false
-  tpl.CoalitionID = nil
-  tpl.CountryID = nil
-  tpl.CategoryID = nil
-  tpl.x = pos.x
-  tpl.y = pos.y
-  if tpl.route and tpl.route.points and tpl.route.points[1] then
-    tpl.route.points[1].x = pos.x
-    tpl.route.points[1].y = pos.y
-  end
-  for i, unit in ipairs(tpl.units) do
-    unit.name = string.format("RH Pilot %d-%d", id, i)
-    unit.unitId = nil
-    unit.x = pos.x + ((unit.x or bx) - bx)
-    unit.y = pos.y + ((unit.y or by) - by)
-    if wetfeet then unit.alt = 0 end
-  end
-  local countryId = csar.pilotCountry or inst.countryblue or country.id.USA
-  local category = csar.pilotCategory or Group.Category.GROUND
-  local ok, err = pcall(coalition.addGroup, countryId, category, tpl)
-  if not ok then return nil, err end
-  local group = GROUP:FindByName(gname)
-  if not group and _DATABASE and _DATABASE.AddGroup then
-    group = _DATABASE:AddGroup(gname)
-  end
-  if not group then return nil, "group was not created" end
-  return group
-end
-
 -- Any blue player helicopter, including the one you took after crashing the first.
--- The old slot list still had the wreck, so the new aircraft was invisible to the rescue check.
 function csar.playerHelicopters()
   local list = {}
   if not SET_GROUP then return list end
@@ -397,31 +270,10 @@ end
 function csar.syncPilots(inst)
   if not inst then return end
   for _, pilot in pairs(inst.downedPilots or {}) do
-    if pilot.alive then
+    if pilot.alive and csar.groupAlive(pilot.group) then
       local pos = csar.positionOf(pilot)
-      local heli, dist, closest = pos and csar.nearestDutyHeli(inst, pos)
-      local reveal = RH.config.csar.revealRadius or 2000
-      local hide = RH.config.csar.hideRadius or 2500
-      if not csar.groupAlive(pilot.group) then
-        if not (pilot.group and pilot.rhShownAt and timer.getTime() - pilot.rhShownAt < 5) then
-          pilot.group = nil
-          pilot.rhHidden = true
-        end
-      end
-      if closest and not closest.onDuty and dist and dist <= reveal then
-        local nag = "duty-" .. tostring(closest.name) .. "-" .. tostring(pilot.index or pilot.name)
-        csar.heard = csar.heard or {}
-        if not csar.heard[nag] then
-          csar.heard[nag] = true
-          RH.dcs.messageToUnit(closest.name, "Report on duty to see this pilot and pick him up.", 10)
-        end
-      end
-      if pilot.rhHidden then
-        if heli and dist and dist <= reveal then csar.showPilot(inst, pilot) end
-      elseif not dist or dist > hide then
-        csar.hidePilot(inst, pilot)
-      end
-      if not pilot.rhHidden and heli and csar.onGround(heli) and dist and dist <= RH.config.csar.landRadius then
+      local heli, dist = pos and csar.nearestDutyHeli(inst, pos)
+      if heli and csar.onGround(heli) and dist and dist <= RH.config.csar.landRadius then
         local key = heli:GetName() .. "_" .. pilot.name
         if not csar.runs[key] then csar.beginRun(inst, heli, pilot, dist) end
       end
@@ -432,8 +284,8 @@ function csar.syncPilots(inst)
           csar.heard[heardKey] = true
           inst:_DisplayMessageToSAR(heli, string.format("%s hears you, %.1f km out. Land within 1 km and he will run to the helicopter.", pilot.desc or "The pilot", dist / 1000), 10, false)
         end
-      elseif dist and dist > 6000 and closest then
-        if csar.heard then csar.heard[closest.name .. "#" .. tostring(pilot.index or pilot.name)] = nil end
+      elseif dist and dist > 6000 and heli then
+        if csar.heard then csar.heard[heli:GetName() .. "#" .. tostring(pilot.index or pilot.name)] = nil end
       end
     end
   end
@@ -493,7 +345,7 @@ function csar.runTick(inst, key, token)
       if group.RouteStop then group:RouteStop() end
       inst:_DisplayMessageToSAR(heli, string.format("%s stopped. Land within 1 km and he will start again.", pilotName), 6, false)
     end
-    if dist > (RH.config.csar.hideRadius or 2500) then
+    if dist > RH.config.csar.landRadius * 3 then
       csar.runs[key] = nil
       return
     end
@@ -783,11 +635,6 @@ function csar.movePilotsTo(point, range, maxPilots)
     if moved >= maxPilots then break end
     if util.distance(p.pos, point) <= range then
       local group = GROUP:FindByName(p.name)
-      if not group and csar.instance then
-        for _, rec in pairs(csar.instance.downedPilots or {}) do
-          if rec.alive and rec.name == p.name then group = csar.showPilot(csar.instance, rec) end
-        end
-      end
       if group then
         group:RouteGroundTo(COORDINATE:NewFromVec2(point), 12, "Off Road", 1)
         moved = moved + 1
