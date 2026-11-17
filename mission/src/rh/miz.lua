@@ -1,9 +1,33 @@
 -- Reads a .miz, puts the saved ground war into its mission table, and writes a new .miz.
--- The original mission file is never modified. RH_INFLATE must be loaded first (src/rh/inflate.lua).
+-- The original mission file is never modified. inflate.lua sits in the same folder as this file.
+-- A DCS hook runs in its own environment, so a global set by the hook is not visible here.
 
 local miz = {}
-local inflate = RH_INFLATE
-assert(inflate and inflate.inflate, "RH_INFLATE.inflate is not loaded")
+
+local function findInflate()
+  local function usable(mod)
+    return type(mod) == "table" and type(mod.inflate) == "function"
+  end
+  if usable(RH_INFLATE) then return RH_INFLATE end
+  if _G and usable(_G.RH_INFLATE) then return _G.RH_INFLATE end
+  local src = ""
+  if debug and debug.getinfo then
+    local info = debug.getinfo(1, "S")
+    src = info and info.source or ""
+  end
+  src = src:gsub("^@", "")
+  local dir = src:match("^(.*)[/\\][^/\\]+$")
+  if not dir or not loadfile then return nil end
+  local sep = dir:find("\\", 1, true) and "\\" or "/"
+  local chunk = loadfile(dir .. sep .. "inflate.lua")
+  if not chunk then return nil end
+  local ok, mod = pcall(chunk)
+  if ok and usable(mod) then return mod end
+  return nil
+end
+
+local inflate = findInflate()
+assert(inflate, "inflate.lua was not loaded from the Hooks folder")
 
 local function le16(n)
   n = math.floor(n) % 65536

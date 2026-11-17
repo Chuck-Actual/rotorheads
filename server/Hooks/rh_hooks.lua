@@ -30,27 +30,33 @@ local function fmt(seconds)
   return string.format("%dh %02dm", math.floor(seconds / 3600), math.floor(seconds % 3600 / 60))
 end
 
+local function savedRoot()
+  local base = lfs.writedir()
+  if not base:match("[/\\]$") then base = base .. "\\" end
+  return base
+end
+
 local function editorPaths()
   local mission = DCS.getMissionFilename()
   if type(mission) ~= "string" or mission == "" then return nil end
-  local dir, filename = mission:match("^(.*)[/\\]([^/\\]+)$")
-  if not dir then return nil end
-  local sep = mission:find("\\", 1, true) and "\\" or "/"
-  local world = lfs.writedir() .. "rotorheads" .. sep .. "world.lua"
-  local dest = dir .. sep .. "RH_Editor.miz"
-  return mission, world, dest, filename
+  local root = savedRoot()
+  -- Always this folder, which is the one the Mission Editor opens by default.
+  local dest = root .. "Missions\\RH_Editor.miz"
+  local world = root .. "rotorheads\\world.lua"
+  return mission, world, dest
 end
 
 local function exportEditor(reason)
-  local mission, world, dest, filename = editorPaths()
+  local mission, world, dest = editorPaths()
   if not mission then
     log("editor export skipped (" .. reason .. "): mission path unavailable")
     return
   end
-  if filename == "RH_Editor.miz" and reason ~= "exit" then
+  log("editor export reading " .. mission)
+  if not lfs.attributes(world) then
+    log("editor export skipped (" .. reason .. "): no world.lua yet")
     return
   end
-  if not lfs.attributes(world) then return end
   local attr = lfs.attributes(mission)
   if reason ~= "exit" and attr and attr.size and attr.size > 8 * 1024 * 1024 then
     if not RHHook.editorDeferred then
@@ -65,8 +71,16 @@ local function exportEditor(reason)
     log("editor export skipped: " .. tostring(inflateOrErr))
     return
   end
-  RH_INFLATE = inflateOrErr
-  local okMiz, mizOrErr = pcall(dofile, hooks .. "rh_miz.lua")
+  _G.RH_INFLATE = inflateOrErr
+  local chunk, loadErr = loadfile(hooks .. "rh_miz.lua")
+  if not chunk then
+    log("editor export skipped: " .. tostring(loadErr))
+    return
+  end
+  if setfenv then
+    setfenv(chunk, setmetatable({ RH_INFLATE = inflateOrErr }, { __index = _G }))
+  end
+  local okMiz, mizOrErr = pcall(chunk)
   if not okMiz then
     log("editor export skipped: " .. tostring(mizOrErr))
     return

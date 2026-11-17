@@ -13,7 +13,7 @@ Players spawn with **dynamic slots** at blue airfields and FARPs, so there are n
 | `%USERPROFILE%\Saved Games\DCS\Missions\Rotorheads\` | `rotorheads.lua` and `Moose_.lua` (copied by the install script). Save your `.miz` here too. |
 | `%USERPROFILE%\Saved Games\DCS\Scripts\Hooks\rh_hooks.lua` | The server hook (chat commands, restart timer). Copied by the install script. |
 | `%USERPROFILE%\Saved Games\DCS\rotorheads\` | Campaign saves (`campaign.lua`, `world.lua`, `ctld.csv`, `csar.csv`) and `livemap.json`. **Delete it to start a fresh war.** |
-| `RH_Editor.miz`, next to the mission you launched | A copy of that mission with the saved ground units, FARPs, and statics written in. Open this in the Mission Editor when you need to fix something by hand. The file you launched is left unchanged. |
+| `%USERPROFILE%\Saved Games\DCS\Missions\RH_Editor.miz` | A copy of the running mission with the saved ground units, FARPs, and statics written in. This is the Missions folder the editor opens, not the Rotorheads subfolder. The mission you launched is left unchanged. |
 | `%USERPROFILE%\Saved Games\DCS\Logs\dcs.log` | The log. Every campaign line starts with `[RH]`. |
 | `<DCS install>\Scripts\MissionScripting.lua` | Must be edited so the campaign can save (the install script does it). |
 
@@ -150,7 +150,7 @@ live in the simulation until they are written out. Every 30 seconds, and again w
 records ground units, ships, statics, and FARP warehouses into `world.lua`. The next launch puts back anything
 that is missing, and removes an editor-placed ground unit that was destroyed.
 
-Leaving the mission also writes `RH_Editor.miz` in the same folder as the mission you launched. Open **that**
+Leaving the mission also writes `Saved Games\DCS\Missions\RH_Editor.miz`. Open **that**
 file in the Mission Editor when you want to move or delete something by hand. The mission you have been
 flying is not overwritten. After you edit `RH_Editor.miz`, launch that file if you want the hand edit to be
 the one the campaign continues from. A new unit you place in it is kept. Cargo that is inside a helicopter
