@@ -2668,6 +2668,49 @@ local function templateKit(groupName)
   end
 end
 
+local function deepCopy(value, seen)
+  if type(value) ~= "table" then return value end
+  seen = seen or {}
+  if seen[value] then return seen[value] end
+  local copy = {}
+  seen[value] = copy
+  for k, v in pairs(value) do
+    copy[deepCopy(k, seen)] = deepCopy(v, seen)
+  end
+  return copy
+end
+
+-- CTLD hides a crate when its group template is not in the mission. The FARP kit is thrown away
+-- after the build, so copy a vehicle template that is already there instead of asking for a new group.
+function ctld.ensureKitTemplate(name)
+  local groups = _DATABASE and _DATABASE.Templates and _DATABASE.Templates.Groups
+  if not groups then
+    util.log("crate template %s skipped: MOOSE group templates are not loaded", name)
+    return false
+  end
+  if groups[name] then return true end
+  local donorName, donor = "RH_TPL_BLUE_HMMWV_TOW", nil
+  donor = groups[donorName]
+  if not donor then
+    for existing, entry in pairs(groups) do
+      if type(existing) == "string" and util.startsWith(existing, "RH_TPL_BLUE_") and entry.Template then
+        donorName, donor = existing, entry
+        break
+      end
+    end
+  end
+  if not donor or not donor.Template then
+    util.log("crate template %s skipped: no RH_TPL_BLUE_ vehicle template is in the mission", name)
+    return false
+  end
+  local copy = deepCopy(donor)
+  copy.GroupName = name
+  copy.Template.name = name
+  groups[name] = copy
+  util.log("crate template %s copied from %s", name, donorName)
+  return true
+end
+
 local function isLogisticsTent(static)
   local name = string.lower(static.name or "")
   local kind = string.lower((static.typeName or "") .. " " .. (static.display or ""))
@@ -2761,6 +2804,7 @@ function ctld.create()
   for _, v in ipairs(c.vehicles) do
     addCrates(v.name, v.template, CTLD_CARGO.Enum.VEHICLE, v.crates, v.mass, v.subcat)
   end
+  ctld.ensureKitTemplate(c.kits.farp.template)
   addCrates(c.kits.farp.name, c.kits.farp.template, CTLD_CARGO.Enum.FOB, c.farp.cratesForFarp, c.farp.farpCrateMass, "Construction")
   addCrates(c.kits.mash.name, c.kits.mash.template, CTLD_CARGO.Enum.FOB, c.mash.crates, c.mash.crateMass, "Construction")
   addCrates(c.kits.outpost.name, c.kits.outpost.template, CTLD_CARGO.Enum.FOB, c.kits.outpost.crates, c.kits.outpost.mass, "Construction")
@@ -2779,7 +2823,8 @@ function ctld.create()
     table.insert(notes, farp.name .. (atTent and " (tent)" or " (zone center, no tent found)"))
   end
   if #notes > 0 then
-    RH.dcs.message("blue", "Logistics load zones, 150 m, shown in blue for 60 seconds: " .. table.concat(notes, ", "), 25)
+    RH.dcs.message("blue", "Logistics load zones, 150 m, shown in blue for 60 seconds: " .. table.concat(notes, ", ")
+      .. ". FARP crates are under CTLD > Manage crates > Get crates > Construction.", 25)
   end
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)

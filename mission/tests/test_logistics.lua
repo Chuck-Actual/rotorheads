@@ -117,6 +117,24 @@ T.test("MASH capacity and transport tasks", function()
   T.eq(RH.logistics.completeTransport("herc"), 30)
 end)
 
+T.test("FARP crate template is copied from the Humvee so Get crates can list it", function()
+  T.fresh()
+  dofile("src/rh/ctld.lua")
+  _DATABASE = { Templates = { Groups = {
+    RH_TPL_BLUE_HMMWV_TOW = {
+      GroupName = "RH_TPL_BLUE_HMMWV_TOW",
+      Template = { name = "RH_TPL_BLUE_HMMWV_TOW", units = { { name = "tow" } } },
+    },
+  } } }
+  T.ok(RH.ctld.ensureKitTemplate("RH_TPL_BLUE_FARP_KIT"))
+  local kit = _DATABASE.Templates.Groups.RH_TPL_BLUE_FARP_KIT
+  T.eq(kit.Template.name, "RH_TPL_BLUE_FARP_KIT")
+  T.eq(kit.Template.units[1].name, "tow")
+  kit.Template.units[1].name = "changed"
+  T.eq(_DATABASE.Templates.Groups.RH_TPL_BLUE_HMMWV_TOW.Template.units[1].name, "tow")
+  _DATABASE = nil
+end)
+
 T.test("captured outposts extend the blue zone", function()
   local w = setup()
   w.zones = { { name = "RH_OUTPOST_KAFR", point = { x = 90000, y = 0 }, radius = 200 } }
