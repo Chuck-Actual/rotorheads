@@ -46,22 +46,6 @@ local function writeText(path, text)
   return true
 end
 
-local function missionString(code)
-  local results = { pcall(net.dostring_in, "mission", code) }
-  if not results[1] then return nil, tostring(results[2]) end
-  local first, second = results[2], results[3]
-  -- DCS returns either a string, or (true, string), or (false, error text).
-  if type(first) == "boolean" then
-    if first and type(second) == "string" then return second end
-    return nil, tostring(second or "mission call failed")
-  end
-  if type(first) == "string" then
-    if first:sub(1, 8) == "[string " then return nil, first end
-    return first
-  end
-  return nil, "mission returned nothing"
-end
-
 local function findSource()
   local tried = {}
   local running = {}
@@ -154,44 +138,97 @@ local function writeNote(source, text)
   if not wrote then log("could not write last_export.txt") end
 end
 
-local function pullWorld()
-  local probe, probeErr = missionString("return (RH.world and RH.world.cachePayload) and 'ready' or 'old-script'")
-  if probe ~= "ready" then
-    return nil, "rotorheads.lua in Missions\\Rotorheads is the old file, so the server cannot read the units. Replace it and restart the mission. The current file is about 5815 lines. The new one is about 4444 lines. (" .. tostring(probe or probeErr) .. ")"
+local function worldFilePaths()
+  local home = os.getenv("USERPROFILE") or ""
+  local paths = { withSlash(lfs.writedir()) .. "rotorheads\\world.lua" }
+  if home ~= "" then
+    paths[#paths + 1] = home .. "\\Saved Games\\DCS\\rotorheads\\world.lua"
+    paths[#paths + 1] = home .. "\\Saved Games\\DCS.dcs_serverrelease\\rotorheads\\world.lua"
+    paths[#paths + 1] = home .. "\\Saved Games\\DCS.openbeta\\rotorheads\\world.lua"
   end
-  local countText, err = missionString("return tostring(RH.world.cachePayload())")
-  if not countText then return nil, err end
-  local count = tonumber(countText:match("^%s*(%d+)%s*$"))
-  if not count then return nil, "mission answered: " .. countText end
-  if count > 2000000 then return nil, "world save is too large" end
-  local size = 4000
-  local parts = {}
-  local n = math.max(1, math.ceil(count / size))
-  if count == 0 then return "" end
-  for i = 1, n do
-    local quoted, partErr = missionString(string.format("return string.format(\"%%q\", RH.world.payloadSlice(%d, %d))", i, size))
-    if not quoted then return nil, partErr or ("missing slice " .. i) end
-    local fn, loadErr = loadstring("return " .. quoted)
-    if not fn then return nil, loadErr end
-    if setfenv then setfenv(fn, {}) end
-    local ran, part = pcall(fn)
-    if not ran or type(part) ~= "string" then return nil, "bad slice " .. i end
-    parts[#parts + 1] = part
+  return paths
+end
+
+local function readWorldFile()
+  for _, path in ipairs(worldFilePaths()) do
+    local f = io.open(path, "rb")
+    if f then
+      local text = f:read("*a")
+      f:close()
+      if type(text) == "string" and text:sub(1, 1) == "{" then return text, path end
+    end
   end
-  local text = table.concat(parts)
-  if #text ~= count then return nil, "world save came back short (" .. #text .. " of " .. count .. ")" end
-  return text
+  return nil
+end
+
+local function missionScriptPaths()
+  local found = {}
+  local function add(path)
+    if type(path) == "string" and path ~= "" then found[#found + 1] = path end
+  end
+  local cwd = lfs.currentdir() or ""
+  add(cwd .. "\\..\\Scripts\\MissionScripting.lua")
+  add(cwd .. "\\..\\..\\Scripts\\MissionScripting.lua")
+  local home = os.getenv("USERPROFILE") or ""
+  if home ~= "" then
+    add(home .. "\\Saved Games\\DCS\\Scripts\\MissionScripting.lua")
+  end
+  return found
+end
+
+-- DCS ships with os, io, and lfs removed from mission scripts. The campaign cannot save until those lines are commented out.
+local function allowMissionFiles()
+  local blocked = { ["sanitizeModule('os')"] = true, ["sanitizeModule('io')"] = true, ["sanitizeModule('lfs')"] = true }
+  local notes = {}
+  for _, path in ipairs(missionScriptPaths()) do
+    local f = io.open(path, "r")
+    if f then
+      local text = f:read("*a")
+      f:close()
+      local changed = false
+      local lines = {}
+      for line in (text .. "\n"):gmatch("(.-)\n") do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        if blocked[trimmed] then
+          lines[#lines + 1] = line:gsub("sanitizeModule", "--sanitizeModule", 1)
+          changed = true
+        else
+          lines[#lines + 1] = line
+        end
+      end
+      if changed then
+        local out = io.open(path, "w")
+        if not out then
+          notes[#notes + 1] = "Found " .. path .. " but Windows would not let the game rewrite it. Open that file as administrator and put -- in front of sanitizeModule('os'), sanitizeModule('io'), and sanitizeModule('lfs')."
+        else
+          out:write(table.concat(lines, "\n"))
+          out:close()
+          notes[#notes + 1] = "Commented out the file block in " .. path .. ". Quit DCS completely and start the server again. The change does nothing until DCS is restarted."
+        end
+      else
+        notes[#notes + 1] = path .. " already allows mission files."
+      end
+    end
+  end
+  if #notes == 0 then
+    notes[1] = "Could not find Scripts\\MissionScripting.lua next to the running game. In the DCS install folder, edit Scripts\\MissionScripting.lua and put -- in front of sanitizeModule('os'), sanitizeModule('io'), and sanitizeModule('lfs'). Quit DCS completely afterward."
+  end
+  return table.concat(notes, "\r\n")
 end
 
 -- Builds RH_Editor.miz beside the running mission. The mission sandbox often cannot write files.
 local function exportEditor()
   local source, tried = findSource()
-  local worldText, worldErr = pullWorld()
+  -- a_do_script runs in the mission environment, which is where RH exists. A bare return from the hook does not.
+  toMission("if RH and RH.persistence and RH.persistence.save then RH.persistence.save() end")
+  local worldText, worldPath = readWorldFile()
   if not worldText then
-    writeNote(source, "Editor mission was not built.\r\nThe mission script did not answer: " .. tostring(worldErr))
+    local looked = table.concat(worldFilePaths(), "\r\n")
+    local access = allowMissionFiles()
+    writeNote(source, "Editor mission was not built.\r\nThe 4444-line mission script is loaded. The yellow line in chat is the block: DCS is not letting the mission write files, so there is no unit save to put into a mission.\r\n" .. access .. "\r\nLooked for the unit save at:\r\n" .. looked)
     if not RHHook.toldFail then
       RHHook.toldFail = true
-      net.send_chat("Rotorheads did not save the editor mission. " .. tostring(worldErr), true)
+      net.send_chat("Rotorheads cannot save yet. DCS is blocking mission files. Quit DCS after this flight and see last_export.txt.", true)
     end
     return
   end
@@ -214,7 +251,7 @@ local function exportEditor()
   local dest = dir .. "\\" .. destName
   local ok, err = packer.exportText(source, worldText, dest)
   if ok then
-    writeNote(source, "Wrote " .. dest .. "\r\nFrom " .. source .. "\r\nStop the server, then open this file in the Mission Editor. The mission that is running is left as it is.")
+    writeNote(source, "Wrote " .. dest .. "\r\nFrom " .. source .. "\r\nUnits from " .. tostring(worldPath) .. "\r\nStop the server, then open this file in the Mission Editor. The mission that is running is left as it is.")
     if not RHHook.told then
       RHHook.told = true
       net.send_chat("Rotorheads saved " .. destName .. ". Stop the server before opening it in the Mission Editor.", true)
