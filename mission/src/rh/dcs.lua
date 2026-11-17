@@ -659,9 +659,9 @@ function dcs.seedFarpSupplies(wh)
 end
 
 function dcs.topUpAirframes(wh)
-  local stock = RH.config.farp.airframes or 999
   for typeName in pairs(RH.config.airframes or {}) do
-    pcall(function() wh:setItem(typeName, stock) end)
+    local count = RH.logistics.farpAirframeCount(typeName)
+    pcall(function() wh:setItem(typeName, count) end)
   end
 end
 

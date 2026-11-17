@@ -300,7 +300,7 @@ RH.config = {
     displayCirclesFor = 60,
     -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
     airframes = 999,
-    -- On the shelf for every aircraft: guns, rounds, rockets, pylons, pods, and air-to-air missiles.
+    -- On the shelf for every helicopter: guns, rounds, rockets, pylons, pods, and air-to-air missiles.
     -- Air-to-ground missiles and fuel are not stocked. APKs stay out.
     supply = { shells = 5000, gunmounts = 99, nurs = 999, containers = 99, adapters = 99, missiles = 99 },
     -- Pad faces north. Tent, depots, and the Humvee sit on the west side and face east.
@@ -437,7 +437,8 @@ RH.config = {
     ["AH-64D_BLK_II"] = { crates = false, troops = false, cratelimit = 0, trooplimit = 0, length = 17, maxweight = 200, csar = 2 },
     ["Ka-50"] = { crates = false, troops = false, cratelimit = 0, trooplimit = 0, length = 15, maxweight = 200, csar = 2 },
     ["Ka-50_3"] = { crates = false, troops = false, cratelimit = 0, trooplimit = 0, length = 15, maxweight = 200, csar = 2 },
-    ["C-130J-30"] = { crates = true, troops = true, cratelimit = 22, trooplimit = 30, length = 35, maxweight = 21500, csar = 30 },
+    -- Fixed wing stays in the crate list. FARPs do not stock it, so it cannot dynamic-spawn there.
+    ["C-130J-30"] = { crates = true, troops = true, cratelimit = 22, trooplimit = 30, length = 35, maxweight = 21500, csar = 30, fixedWing = true },
   },
 }
 
@@ -1236,9 +1237,9 @@ function dcs.seedFarpSupplies(wh)
 end
 
 function dcs.topUpAirframes(wh)
-  local stock = RH.config.farp.airframes or 999
   for typeName in pairs(RH.config.airframes or {}) do
-    pcall(function() wh:setItem(typeName, stock) end)
+    local count = RH.logistics.farpAirframeCount(typeName)
+    pcall(function() wh:setItem(typeName, count) end)
   end
 end
 
@@ -1518,39 +1519,116 @@ function logistics.captureStocks()
   end
 end
 
--- Hellfires, TOWs, Vikhrs, Mavericks, and the other air-to-ground missiles.
-function logistics.isAirToGroundMissile(item)
-  if type(item) ~= "string" then return false end
-  local name = string.upper(item)
-  local marks = {
-    "AGM", "AGR_20", "APK", "TOW", "HOT", "VIKHR", "ATAKA", "MALUTKA", "KONKURS",
-    "SPIKE", "SVIR", "REFLEX", "AT_6", "9M120", "9M220", "9M133", "HELLFIRE",
-    "X_25", "X_29", "X_31", "X_35", "X_41", "X_58", "X_59", "X_65", "X_22", "X_101", "X_555",
-    "RB75", "RB 04", "RB 05", "RB 15", "RB_04", "AKD", "C_701", "C_802", "CM-802", "CM_802",
-    "YJ-83", "YJ83", "KD_63", "KD_20", "ALARM", "KORMORAN", "SEA_EAGLE", "HJ-12", "HJ12",
-    "BGM_109", "9M723", "GB-6", "GB6", "LS_6", "BK90", "DWS39", "BRM-1", "ASM_N", "P_9M133",
-  }
-  for _, mark in ipairs(marks) do
-    if string.find(name, mark, 1, true) then return true end
-  end
-  return false
+-- Aircraft air-to-air only. Anything else in the missile list is air-to-ground, a decoy, or a SAM.
+local airToAir = {
+  ["weapons.missiles.9M39_IGLA"] = true,
+  ["weapons.missiles.AIM-7E"] = true,
+  ["weapons.missiles.AIM-7E-2"] = true,
+  ["weapons.missiles.AIM-7F"] = true,
+  ["weapons.missiles.AIM-7MH"] = true,
+  ["weapons.missiles.AIM-7P"] = true,
+  ["weapons.missiles.AIM-9E"] = true,
+  ["weapons.missiles.AIM-9J"] = true,
+  ["weapons.missiles.AIM-9JULI"] = true,
+  ["weapons.missiles.AIM-9L"] = true,
+  ["weapons.missiles.AIM-9P"] = true,
+  ["weapons.missiles.AIM-9P3"] = true,
+  ["weapons.missiles.AIM-9P5"] = true,
+  ["weapons.missiles.AIM_120"] = true,
+  ["weapons.missiles.AIM_120C"] = true,
+  ["weapons.missiles.AIM_54"] = true,
+  ["weapons.missiles.AIM_54A_Mk47"] = true,
+  ["weapons.missiles.AIM_54A_Mk60"] = true,
+  ["weapons.missiles.AIM_54C_Mk47"] = true,
+  ["weapons.missiles.AIM_54C_Mk60"] = true,
+  ["weapons.missiles.AIM_7"] = true,
+  ["weapons.missiles.AIM_9"] = true,
+  ["weapons.missiles.AIM_9X"] = true,
+  ["weapons.missiles.CATM_9M"] = true,
+  ["weapons.missiles.CHAP_AIM92"] = true,
+  ["weapons.missiles.FIM_92C"] = true,
+  ["weapons.missiles.GAR-8"] = true,
+  ["weapons.missiles.HB-AIM-7E"] = true,
+  ["weapons.missiles.HB-AIM-7E-2"] = true,
+  ["weapons.missiles.Igla_1E"] = true,
+  ["weapons.missiles.Igla_S"] = true,
+  ["weapons.missiles.MICA_R"] = true,
+  ["weapons.missiles.MICA_T"] = true,
+  ["weapons.missiles.MMagicII"] = true,
+  ["weapons.missiles.Matra Super 530D"] = true,
+  ["weapons.missiles.Mistral"] = true,
+  ["weapons.missiles.OH58D_FIM_92"] = true,
+  ["weapons.missiles.PL-12"] = true,
+  ["weapons.missiles.PL-5EII"] = true,
+  ["weapons.missiles.PL-8A"] = true,
+  ["weapons.missiles.PL-8B"] = true,
+  ["weapons.missiles.P_24R"] = true,
+  ["weapons.missiles.P_24T"] = true,
+  ["weapons.missiles.P_27P"] = true,
+  ["weapons.missiles.P_27PE"] = true,
+  ["weapons.missiles.P_27T"] = true,
+  ["weapons.missiles.P_27TE"] = true,
+  ["weapons.missiles.P_33E"] = true,
+  ["weapons.missiles.P_40R"] = true,
+  ["weapons.missiles.P_40T"] = true,
+  ["weapons.missiles.P_60"] = true,
+  ["weapons.missiles.P_73"] = true,
+  ["weapons.missiles.P_77"] = true,
+  ["weapons.missiles.R-13M"] = true,
+  ["weapons.missiles.R-13M1"] = true,
+  ["weapons.missiles.R-3R"] = true,
+  ["weapons.missiles.R-3S"] = true,
+  ["weapons.missiles.R-55"] = true,
+  ["weapons.missiles.R-60"] = true,
+  ["weapons.missiles.RS2US"] = true,
+  ["weapons.missiles.R_530F_EM"] = true,
+  ["weapons.missiles.R_530F_IR"] = true,
+  ["weapons.missiles.R_550"] = true,
+  ["weapons.missiles.R_550_M1"] = true,
+  ["weapons.missiles.Rb 24"] = true,
+  ["weapons.missiles.Rb 24J"] = true,
+  ["weapons.missiles.Rb 74"] = true,
+  ["weapons.missiles.SD-10"] = true,
+  ["weapons.missiles.Strela-2"] = true,
+  ["weapons.missiles.Strela-2M"] = true,
+  ["weapons.missiles.Strela-3"] = true,
+  ["weapons.missiles.Super_530D"] = true,
+  ["weapons.missiles.Super_530F"] = true,
+}
+
+function logistics.isAirToAirMissile(item)
+  return airToAir[item] == true
 end
 
--- Guns, rounds, rockets, pylons, pods, and air-to-air missiles are on the shelf. APKs are not.
+-- Guns, rounds, rockets, pylons, pods, and air-to-air missiles are on the shelf.
+-- Every other missile stays off it. APKs and Hercules gear stay off it too.
 function logistics.farpSupplyCount(category, item)
-  if type(item) == "string" and string.find(string.upper(item), "APK", 1, true) then return nil end
-  if logistics.isAirToGroundMissile(item) then return nil end
+  if type(item) ~= "string" then return nil end
+  local upper = string.upper(item)
+  if string.find(upper, "APK", 1, true) or string.find(upper, "C130", 1, true) then return nil end
+  if category == "missiles" or string.find(item, "weapons.missiles.", 1, true) then
+    if not logistics.isAirToAirMissile(item) then return nil end
+  end
   local supply = fcfg().supply or {}
   return supply[category]
 end
 
--- Air-to-ground missiles stay at whatever was hauled in. Everything else is restocked.
+-- Hauled air-to-ground missiles, bombs, and torpedoes are the only counts worth saving.
 function logistics.keepHauledWeapon(item)
   if type(item) ~= "string" then return false end
   if string.find(string.upper(item), "APK", 1, true) then return false end
-  if logistics.isAirToGroundMissile(item) then return true end
+  if string.find(item, "weapons.missiles.", 1, true) then
+    return not logistics.isAirToAirMissile(item)
+  end
   return string.find(item, "weapons.bombs.", 1, true) ~= nil
     or string.find(item, "weapons.torpedoes.", 1, true) ~= nil
+end
+
+-- Helicopters are restocked. Fixed wing is cleared so it cannot dynamic-spawn at a FARP.
+function logistics.farpAirframeCount(typeName)
+  local info = (RH.config.airframes or {})[typeName]
+  if type(info) ~= "table" or info.fixedWing then return 0 end
+  return fcfg().airframes or 999
 end
 
 function logistics.hasWarehouseStock(farp)

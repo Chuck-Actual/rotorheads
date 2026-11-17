@@ -109,7 +109,7 @@ RH.config = {
     displayCirclesFor = 60,
     -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
     airframes = 999,
-    -- On the shelf for every aircraft: guns, rounds, rockets, pylons, pods, and air-to-air missiles.
+    -- On the shelf for every helicopter: guns, rounds, rockets, pylons, pods, and air-to-air missiles.
     -- Air-to-ground missiles and fuel are not stocked. APKs stay out.
     supply = { shells = 5000, gunmounts = 99, nurs = 999, containers = 99, adapters = 99, missiles = 99 },
     -- Pad faces north. Tent, depots, and the Humvee sit on the west side and face east.
@@ -246,7 +246,8 @@ RH.config = {
     ["AH-64D_BLK_II"] = { crates = false, troops = false, cratelimit = 0, trooplimit = 0, length = 17, maxweight = 200, csar = 2 },
     ["Ka-50"] = { crates = false, troops = false, cratelimit = 0, trooplimit = 0, length = 15, maxweight = 200, csar = 2 },
     ["Ka-50_3"] = { crates = false, troops = false, cratelimit = 0, trooplimit = 0, length = 15, maxweight = 200, csar = 2 },
-    ["C-130J-30"] = { crates = true, troops = true, cratelimit = 22, trooplimit = 30, length = 35, maxweight = 21500, csar = 30 },
+    -- Fixed wing stays in the crate list. FARPs do not stock it, so it cannot dynamic-spawn there.
+    ["C-130J-30"] = { crates = true, troops = true, cratelimit = 22, trooplimit = 30, length = 35, maxweight = 21500, csar = 30, fixedWing = true },
   },
 }
 

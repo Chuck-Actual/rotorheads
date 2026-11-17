@@ -79,19 +79,32 @@ T.test("building within 1 NM of a friendly airfield makes an LC", function()
   T.ok(why:find("1 mile"), why)
 end)
 
-T.test("FARP stocks guns and rockets, not missiles, fuel, or APKs", function()
+T.test("FARP stocks guns, rockets, and air-to-air missiles, not air-to-ground", function()
   T.fresh()
   T.eq(RH.logistics.farpSupplyCount("shells", "weapons.shells.M230_HEDP M789"), 5000)
   T.eq(RH.logistics.farpSupplyCount("nurs", "weapons.nurs.HYDRA_70_M151"), 999)
   T.eq(RH.logistics.farpSupplyCount("containers", "weapons.containers.APK-9"), nil)
-  T.eq(RH.logistics.farpSupplyCount("missiles", "weapons.missiles.AGM_114K"), nil)
+  T.eq(RH.logistics.farpSupplyCount("gunmounts", "weapons.gunmounts.{CH47_AFT_M134D}"), 99)
   T.eq(RH.logistics.farpSupplyCount("missiles", "weapons.missiles.AIM_9X"), 99)
   T.eq(RH.logistics.farpSupplyCount("missiles", "weapons.missiles.FIM_92C"), 99)
-  T.eq(RH.logistics.farpSupplyCount("gunmounts", "weapons.gunmounts.{CH47_AFT_M134D}"), 99)
-  T.ok(RH.logistics.keepHauledWeapon("weapons.missiles.AGM_114K"))
+  T.eq(RH.logistics.farpSupplyCount("missiles", "weapons.missiles.Mistral"), 99)
+  local keptOff = {
+    "AGM_114K", "AGM_114", "Vikhr_M", "SA9M311", "ADM_141A", "ADM_141B", "AM39",
+    "CM-400AKG", "M30", "M31", "HY-2", "Kh25MP_PRGS1VP", "Kh-66_Grom", "X_28",
+    "LD-10", "M39A1", "M48", "P_500", "P_700", "S_25L", "SCUD_RAKETA", "V-1",
+    "YJ-12", "YJ-62", "YJ-82", "P_9M117", "AGR_20A",
+  }
+  for _, name in ipairs(keptOff) do
+    local item = "weapons.missiles." .. name
+    T.eq(RH.logistics.farpSupplyCount("missiles", item), nil)
+    T.ok(RH.logistics.keepHauledWeapon(item))
+  end
   T.ok(not RH.logistics.keepHauledWeapon("weapons.missiles.AIM_9X"))
   T.ok(not RH.logistics.keepHauledWeapon("weapons.nurs.HYDRA_70_M151"))
   T.ok(not RH.logistics.keepHauledWeapon("weapons.containers.APK-9"))
+  T.eq(RH.logistics.farpAirframeCount("UH-1H"), 999)
+  T.eq(RH.logistics.farpAirframeCount("AH-64D_BLK_II"), 999)
+  T.eq(RH.logistics.farpAirframeCount("C-130J-30"), 0)
 end)
 
 T.test("a FARP brings the services DCS needs to rearm and refuel", function()
