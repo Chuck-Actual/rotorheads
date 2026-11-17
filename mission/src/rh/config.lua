@@ -107,6 +107,16 @@ RH.config = {
   csar = {
     -- Each player keeps this many downed pilots. A newer death does not erase the earlier ones.
     keepPerPlayer = 3,
+    -- The helicopter has to be on the ground inside this distance before the pilot runs over.
+    landRadius = 1000,
+    -- 25 m is 5 seconds, 100 m is 20 seconds. A full kilometer would be 200 seconds, so it caps here.
+    -- The cap starts at 300 m: from there out to 1 km the pilot is aboard in 60 seconds.
+    boardMaxSeconds = 60,
+    -- The infantry model stays hidden until an on-duty helicopter is this close, then it appears.
+    revealRadius = 2000,
+    hideRadius = 2500,
+    -- Smoke and flare reach any pilot inside this distance. The menu lists them so you can pick one.
+    signalRadius = 10000,
   },
 
   mash = {

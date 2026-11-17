@@ -298,6 +298,16 @@ RH.config = {
   csar = {
     -- Each player keeps this many downed pilots. A newer death does not erase the earlier ones.
     keepPerPlayer = 3,
+    -- The helicopter has to be on the ground inside this distance before the pilot runs over.
+    landRadius = 1000,
+    -- 25 m is 5 seconds, 100 m is 20 seconds. A full kilometer would be 200 seconds, so it caps here.
+    -- The cap starts at 300 m: from there out to 1 km the pilot is aboard in 60 seconds.
+    boardMaxSeconds = 60,
+    -- The infantry model stays hidden until an on-duty helicopter is this close, then it appears.
+    revealRadius = 2000,
+    hideRadius = 2500,
+    -- Smoke and flare reach any pilot inside this distance. The menu lists them so you can pick one.
+    signalRadius = 10000,
   },
 
   mash = {
@@ -2822,7 +2832,7 @@ function csar.create()
   inst.allowFARPRescue = false
   inst.mashprefix = { RH.config.prefixes.mash }
   inst.pilotRuntoExtractPoint = true
-  inst.extractDistance = 500
+  inst.extractDistance = RH.config.csar.landRadius
   -- The pilot has to reach the helicopter. Landing on top of him no longer skips the run.
   inst.loadDistance = 30
   inst.FARPRescueDistance = RH.config.mash.radius
@@ -2851,40 +2861,42 @@ function csar.create()
 end
 
 function csar.installHooks(inst)
-  -- Run to the helicopter at a jog, and keep a countdown on screen until he climbs in.
-  -- MOOSE picks the pilot up immediately when you land within about 80 m, so this replaces that check.
-  local stockCheck = inst._CheckCloseWoundedGroup
+  -- The rescue loop in MOOSE only looks again every 20 seconds, which left the pilot standing
+  -- at the helicopter long after the countdown. This timer owns the run and boards him when it hits zero.
+  csar.runs = {}
   function inst:_OrderGroupToMoveToPoint(leader, destination)
     if not leader or not destination then return end
     leader:SetAIOn()
     leader:RouteToVec2(destination:GetVec2(), 8)
   end
   function inst:_CheckCloseWoundedGroup(distance, heliUnit, heliName, woundedGroup, woundedGroupName)
-    if heliUnit:InAir() then
-      return stockCheck(self, distance, heliUnit, heliName, woundedGroup, woundedGroupName)
+    if heliUnit:InAir() or distance > RH.config.csar.landRadius then return false end
+    local key = heliName .. "_" .. woundedGroupName
+    if csar.runs[key] then return false end
+    local _, pilot = self:_CheckNameInDownedPilots(woundedGroupName)
+    if pilot then csar.beginRun(self, heliUnit, pilot, distance) end
+    return false
+  end
+
+  -- A hidden pilot has no group. Keep the record anyway, or the next status pass deletes him.
+  function inst:_CheckDownedPilotTable()
+    local keep = {}
+    for index, entry in pairs(self.downedPilots or {}) do
+      local group = entry.group
+      local onMap = group and group.IsAlive and group:IsAlive()
+      if onMap or (entry.alive and entry.rhHidden) then
+        keep[index] = entry
+      elseif entry.alive then
+        self:__KIA(1, entry.desc)
+      end
     end
-    if distance >= (self.extractDistance or 500) then return false end
-    local key = heliUnit:GetName() .. "_" .. woundedGroupName
-    local _, pilotable = self:_CheckNameInDownedPilots(woundedGroupName)
-    local pilotName = (pilotable and pilotable.desc) or "The pilot"
-    local left = self.landedStatus[key]
-    if left == nil then
-      -- 25 m is about 5 seconds, 50 m is 10, 100 m is 20. The check runs every 5 seconds.
-      left = math.max(5, math.floor(distance / 5))
-      woundedGroup:OptionAlarmStateGreen()
-      self:_OrderGroupToMoveToPoint(woundedGroup, heliUnit:GetCoordinate())
-    else
-      left = left - 5
-    end
-    if left < 0 then left = 0 end
-    self.landedStatus[key] = left
-    if left > 0 then
-      self:_DisplayMessageToSAR(heliUnit, string.format("%s is running to the helicopter. Boarding in %d seconds.", pilotName, left), 5, false)
-      return false
-    end
-    self.landedStatus[key] = nil
-    self:_PickupUnit(heliUnit, pilotName, woundedGroup, woundedGroupName)
-    return true
+    self.downedPilots = keep
+  end
+
+  local stockTrack = inst._CreateDownedPilotTrack
+  function inst:_CreateDownedPilotTrack(...)
+    stockTrack(self, ...)
+    csar.syncPilots(self)
   end
 
   -- Drop the pilot only inside the MASH zone. Landing at the airfield keeps him aboard.
@@ -2986,6 +2998,8 @@ function csar.installHooks(inst)
       if player and RH.state.lives[player] then RH.lives.restore(player, 1) end
     end
   end
+
+  inst:ScheduleOnce(2, csar.watch, inst)
 end
 
 -- A full MASH stops accepting rescues until a transport task empties it.
@@ -3010,12 +3024,193 @@ function csar.spawnStranded(pos, player, typeName)
   csar.instance:SpawnCSARAtZone(zone, coalition.side.BLUE, player, false, false, player, typeName, true)
 end
 
+function csar.boardSeconds(distance)
+  local seconds = math.floor((distance or 0) / 5)
+  if seconds < 5 then seconds = 5 end
+  local cap = RH.config.csar.boardMaxSeconds or 60
+  if seconds > cap then seconds = cap end
+  return seconds
+end
+
+function csar.positionOf(pilot)
+  if not pilot then return nil end
+  if pilot.group and pilot.group.IsAlive and pilot.group:IsAlive() then
+    local v = pilot.group:GetVec2()
+    if v then pilot.rhPos = { x = v.x, y = v.y } end
+  end
+  return pilot.rhPos
+end
+
+function csar.runFor(groupName)
+  for key, run in pairs(csar.runs or {}) do
+    if run.groupName == groupName then return key, run end
+  end
+end
+
+function csar.hidePilot(inst, pilot)
+  if not pilot or pilot.rhHidden or csar.runFor(pilot.name) then return end
+  local pos = csar.positionOf(pilot)
+  if not pos then return end
+  if pilot.group and pilot.group.IsAlive and pilot.group:IsAlive() then
+    pilot.group:Destroy(false)
+  end
+  pilot.group = nil
+  pilot.rhHidden = true
+end
+
+function csar.showPilot(inst, pilot)
+  if not pilot then return end
+  if pilot.group and pilot.group.IsAlive and pilot.group:IsAlive() then
+    pilot.rhHidden = false
+    return pilot.group
+  end
+  local pos = pilot.rhPos
+  if not pos or not COORDINATE then return end
+  local group = inst:_SpawnPilotInField(inst.countryblue or country.id.USA, COORDINATE:NewFromVec2(pos), pilot.frequency or 0, pilot.wetfeet)
+  if not group then return end
+  inst:_AddSpecialOptions(group)
+  pilot.group = group
+  pilot.name = group:GetName() or pilot.name
+  pilot.rhHidden = false
+  pilot.alive = true
+  return group
+end
+
+function csar.nearestDutyHeli(inst, pos)
+  local best, bestDist
+  for name in pairs(inst.csarUnits or {}) do
+    if csar.unitOnDuty(name) then
+      local heli = inst:_GetSARHeli(name)
+      if heli and heli:IsAlive() then
+        local d = util.distance(pos, heli:GetVec2())
+        if not bestDist or d < bestDist then best, bestDist = heli, d end
+      end
+    end
+  end
+  return best, bestDist
+end
+
+function csar.syncPilots(inst)
+  if not inst then return end
+  for _, pilot in pairs(inst.downedPilots or {}) do
+    if pilot.alive then
+      local pos = csar.positionOf(pilot)
+      local heli, dist = pos and csar.nearestDutyHeli(inst, pos)
+      local reveal = RH.config.csar.revealRadius or 2000
+      local hide = RH.config.csar.hideRadius or 2500
+      if pilot.rhHidden then
+        if dist and dist <= reveal then csar.showPilot(inst, pilot) end
+      elseif not dist or dist > hide then
+        csar.hidePilot(inst, pilot)
+      end
+      if not pilot.rhHidden and heli and not heli:InAir() and dist and dist <= RH.config.csar.landRadius then
+        local key = heli:GetName() .. "_" .. pilot.name
+        if not csar.runs[key] then csar.beginRun(inst, heli, pilot, dist) end
+      end
+      if heli and dist and dist <= 5000 then
+        local heardKey = heli:GetName() .. "#" .. tostring(pilot.index or pilot.name)
+        csar.heard = csar.heard or {}
+        if not csar.heard[heardKey] then
+          csar.heard[heardKey] = true
+          inst:_DisplayMessageToSAR(heli, string.format("%s hears you, %.1f km out. Land within 1 km and he will run to the helicopter.", pilot.desc or "The pilot", dist / 1000), 10, false)
+        end
+      elseif heli and dist and dist > 6000 then
+        if csar.heard then csar.heard[heli:GetName() .. "#" .. tostring(pilot.index or pilot.name)] = nil end
+      end
+    end
+  end
+end
+
+function csar.watch(inst)
+  if csar.instance ~= inst then return end
+  csar.syncPilots(inst)
+  inst:ScheduleOnce(2, csar.watch, inst)
+end
+
+function csar.beginRun(inst, heli, pilot, distance)
+  local group = pilot.group
+  if not group or not group:IsAlive() then return end
+  local heliName = heli:GetName()
+  local key = heliName .. "_" .. pilot.name
+  if csar.runs[key] then return end
+  local seconds = csar.boardSeconds(distance)
+  csar.runToken = (csar.runToken or 0) + 1
+  local token = csar.runToken
+  csar.runs[key] = {
+    token = token, deadline = timer.getTime() + seconds, paused = false,
+    groupName = pilot.name, heliName = heliName, pilotIndex = pilot.index, lastAnnounced = seconds,
+  }
+  group:OptionAlarmStateGreen()
+  inst:_OrderGroupToMoveToPoint(group, heli:GetCoordinate())
+  inst:_DisplayMessageToSAR(heli, string.format("%s is running to the helicopter. Boarding in %d seconds.", pilot.desc or "The pilot", seconds), 5, false)
+  inst:ScheduleOnce(1, csar.runTick, inst, key, token)
+end
+
+function csar.runTick(inst, key, token)
+  local run = csar.runs[key]
+  if not run or run.token ~= token or csar.instance ~= inst then return end
+  local heli = inst:_GetSARHeli(run.heliName)
+  local _, pilot = inst:_CheckNameInDownedPilots(run.groupName)
+  if not pilot and run.pilotIndex then
+    for _, p in pairs(inst.downedPilots or {}) do
+      if p.index == run.pilotIndex and p.alive then pilot = p break end
+    end
+  end
+  local group = pilot and pilot.group
+  if not heli or not heli:IsAlive() or not pilot or not pilot.alive or not group or not group:IsAlive() then
+    csar.runs[key] = nil
+    return
+  end
+  local dist = util.distance(heli:GetVec2(), group:GetVec2())
+  local pilotName = pilot.desc or "The pilot"
+  if heli:InAir() or dist > RH.config.csar.landRadius then
+    if not run.paused then
+      run.paused = true
+      if group.RouteStop then group:RouteStop() end
+      inst:_DisplayMessageToSAR(heli, string.format("%s stopped. Land within 1 km and he will start again.", pilotName), 6, false)
+    end
+    if dist > (RH.config.csar.hideRadius or 2500) then
+      csar.runs[key] = nil
+      return
+    end
+    inst:ScheduleOnce(1, csar.runTick, inst, key, token)
+    return
+  end
+  if run.paused then
+    local seconds = csar.boardSeconds(dist)
+    run.deadline = timer.getTime() + seconds
+    run.paused = false
+    run.lastAnnounced = seconds
+    run.groupName = pilot.name
+    group:OptionAlarmStateGreen()
+    inst:_OrderGroupToMoveToPoint(group, heli:GetCoordinate())
+    inst:_DisplayMessageToSAR(heli, string.format("%s is running to the helicopter. Boarding in %d seconds.", pilotName, seconds), 5, false)
+    inst:ScheduleOnce(1, csar.runTick, inst, key, token)
+    return
+  end
+  local left = math.ceil(run.deadline - timer.getTime())
+  if left <= 0 then
+    csar.runs[key] = nil
+    inst.landedStatus[key] = nil
+    inst:_PickupUnit(heli, pilotName, group, pilot.name)
+    return
+  end
+  if left ~= run.lastAnnounced and (left <= 5 or left % 10 == 0) then
+    run.lastAnnounced = left
+    inst:_DisplayMessageToSAR(heli, string.format("%s is running to the helicopter. Boarding in %d seconds.", pilotName, left), 4, false)
+  end
+  inst:ScheduleOnce(1, csar.runTick, inst, key, token)
+end
+
 function csar.list()
   local out = {}
   if not csar.instance then return out end
   for _, p in pairs(csar.instance.downedPilots or {}) do
-    if p.alive and p.group and p.group:IsAlive() then
-      table.insert(out, { name = p.name, description = p.desc or p.player or "Downed pilot", pos = p.group:GetVec2() })
+    if p.alive then
+      local pos = csar.positionOf(p)
+      if pos then
+        table.insert(out, { name = p.name, description = p.desc or p.player or "Downed pilot", pos = pos })
+      end
     end
   end
   return out
@@ -3082,11 +3277,13 @@ function csar.buildMenu(inst, group, unitName)
   MENU_GROUP_COMMAND:New(group, "Check onboard", root, function()
     if csar.requireDuty(unitName) then inst:_CheckOnboard(unitName) end
   end)
-  MENU_GROUP_COMMAND:New(group, "Request signal flare", root, function()
-    if csar.requireDuty(unitName) then inst:_SignalFlare(unitName) end
+  local smokeMenu = MENU_GROUP:New(group, "Request smoke", root)
+  local flareMenu = MENU_GROUP:New(group, "Request flare", root)
+  MENU_GROUP_COMMAND:New(group, "Show pilots within 10 km", smokeMenu, function()
+    csar.fillSignalMenu(group, smokeMenu, unitName, "smoke")
   end)
-  MENU_GROUP_COMMAND:New(group, "Request smoke", root, function()
-    if csar.requireDuty(unitName) then inst:_Reqsmoke(unitName) end
+  MENU_GROUP_COMMAND:New(group, "Show pilots within 10 km", flareMenu, function()
+    csar.fillSignalMenu(group, flareMenu, unitName, "flare")
   end)
 
   local mash = MENU_GROUP:New(group, "MASH", root)
@@ -3099,6 +3296,77 @@ function csar.buildMenu(inst, group, unitName)
   MENU_GROUP_COMMAND:New(group, "Smoke closest MASH", mash, function()
     inst:_ReqsmokeMash(unitName)
   end)
+end
+
+function csar.pilotsNear(unitName, radius)
+  local heli = UNIT and UNIT.FindByName and UNIT:FindByName(unitName)
+  if not heli or not heli:IsAlive() then return {} end
+  local pos = heli:GetVec2()
+  local out = {}
+  for _, pilot in pairs((csar.instance and csar.instance.downedPilots) or {}) do
+    if pilot.alive then
+      local pp = csar.positionOf(pilot)
+      if pp then
+        local d = util.distance(pos, pp)
+        if d <= radius then table.insert(out, { pilot = pilot, distance = d }) end
+      end
+    end
+  end
+  table.sort(out, function(a, b) return a.distance < b.distance end)
+  return out
+end
+
+function csar.fillSignalMenu(group, menu, unitName, kind)
+  if menu.RemoveSubMenus then menu:RemoveSubMenus() end
+  MENU_GROUP_COMMAND:New(group, "Show pilots within 10 km", menu, function()
+    csar.fillSignalMenu(group, menu, unitName, kind)
+  end)
+  if not csar.requireDuty(unitName) then return end
+  local near = csar.pilotsNear(unitName, RH.config.csar.signalRadius or 10000)
+  if #near == 0 then
+    MENU_GROUP_COMMAND:New(group, "None within 10 km", menu, function() end)
+    return
+  end
+  for _, item in ipairs(near) do
+    local who = item.pilot.desc or item.pilot.player or "Downed pilot"
+    if #who > 22 then who = string.sub(who, 1, 22) end
+    local label = string.format("%s %.1fkm", who, item.distance / 1000)
+    local pilotIndex = item.pilot.index
+    MENU_GROUP_COMMAND:New(group, label, menu, function()
+      csar.signalPilot(unitName, pilotIndex, kind)
+    end)
+  end
+end
+
+function csar.signalPilot(unitName, pilotIndex, kind)
+  if not csar.requireDuty(unitName) then return end
+  local inst = csar.instance
+  local heli = inst and inst:_GetSARHeli(unitName)
+  local pilot
+  for _, p in pairs(inst and inst.downedPilots or {}) do
+    if p.alive and p.index == pilotIndex then pilot = p break end
+  end
+  if not heli or not pilot then
+    RH.dcs.messageToUnit(unitName, "That pilot is no longer there.", 8)
+    return
+  end
+  local pos = csar.positionOf(pilot)
+  if not pos then return end
+  local dist = util.distance(heli:GetVec2(), pos)
+  if dist > (RH.config.csar.signalRadius or 10000) then
+    RH.dcs.messageToUnit(unitName, "That pilot is more than 10 km away.", 8)
+    return
+  end
+  local coord = COORDINATE:NewFromVec2(pos)
+  local clock = inst:_GetClockDirection(heli, { GetCoordinate = function() return coord end })
+  local who = pilot.desc or pilot.player or "The pilot"
+  if kind == "flare" then
+    coord:FlareRed(clock or 0)
+    inst:_DisplayMessageToSAR(heli, string.format("%s fired a red flare at your %s o'clock, %.1f km.", who, tostring(clock), dist / 1000), 10, false)
+  else
+    coord:SmokeBlue()
+    inst:_DisplayMessageToSAR(heli, string.format("%s popped blue smoke at your %s o'clock, %.1f km.", who, tostring(clock), dist / 1000), 10, false)
+  end
 end
 
 function csar.loadPatients(unitName)
@@ -3164,6 +3432,11 @@ function csar.movePilotsTo(point, range, maxPilots)
     if moved >= maxPilots then break end
     if util.distance(p.pos, point) <= range then
       local group = GROUP:FindByName(p.name)
+      if not group and csar.instance then
+        for _, rec in pairs(csar.instance.downedPilots or {}) do
+          if rec.alive and rec.name == p.name then group = csar.showPilot(csar.instance, rec) end
+        end
+      end
       if group then
         group:RouteGroundTo(COORDINATE:NewFromVec2(point), 12, "Off Road", 1)
         moved = moved + 1
