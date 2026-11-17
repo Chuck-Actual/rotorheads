@@ -215,7 +215,13 @@ function logistics.validateMashSite(point)
 end
 
 function logistics.registerMash(name, point)
-  RH.state.mashes[name] = RH.state.mashes[name] or { x = point.x, y = point.y, patients = 0 }
+  local existing = RH.state.mashes[name]
+  if existing then
+    -- The mission-editor zone wins over a saved position, so moving the zone moves the tent.
+    existing.x, existing.y = point.x, point.y
+    return existing
+  end
+  RH.state.mashes[name] = { x = point.x, y = point.y, patients = 0 }
   return RH.state.mashes[name]
 end
 

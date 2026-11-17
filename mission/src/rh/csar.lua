@@ -21,7 +21,8 @@ end
 function csar.create()
   local inst = CSAR:New(coalition.side.BLUE, "RH_TPL_DOWNED_PILOT", "RH CSAR")
   inst.useprefix = false
-  inst.allowFARPRescue = true
+  -- An airfield landing must not drop the pilot. Only the MASH zone does that.
+  inst.allowFARPRescue = false
   inst.mashprefix = { RH.config.prefixes.mash }
   inst.pilotRuntoExtractPoint = true
   inst.extractDistance = 500
@@ -69,23 +70,42 @@ function csar.installHooks(inst)
     local key = heliUnit:GetName() .. "_" .. woundedGroupName
     local _, pilotable = self:_CheckNameInDownedPilots(woundedGroupName)
     local pilotName = (pilotable and pilotable.desc) or "The pilot"
-    woundedGroup:OptionAlarmStateGreen()
-    self:_OrderGroupToMoveToPoint(woundedGroup, heliUnit:GetCoordinate())
     local left = self.landedStatus[key]
     if left == nil then
-      left = math.max(15, math.floor((distance - self.loadDistance) / 4))
+      -- 25 m is about 5 seconds, 50 m is 10, 100 m is 20. The check runs every 5 seconds.
+      left = math.max(5, math.floor(distance / 5))
+      woundedGroup:OptionAlarmStateGreen()
+      self:_OrderGroupToMoveToPoint(woundedGroup, heliUnit:GetCoordinate())
     else
       left = left - 5
     end
     if left < 0 then left = 0 end
     self.landedStatus[key] = left
-    if distance > self.loadDistance or left > 0 then
+    if left > 0 then
       self:_DisplayMessageToSAR(heliUnit, string.format("%s is running to the helicopter. Boarding in %d seconds.", pilotName, left), 5, false)
       return false
     end
     self.landedStatus[key] = nil
     self:_PickupUnit(heliUnit, pilotName, woundedGroup, woundedGroupName)
     return true
+  end
+
+  -- Drop the pilot only inside the MASH zone. Landing at the airfield keeps him aboard.
+  function inst:_ScheduledSARFlight(heliname, groupname, isairport, noreschedule)
+    local heli = self:_GetSARHeli(heliname)
+    if not heli then
+      self.inTransitGroups[heliname] = nil
+      return
+    end
+    local onboard = self.inTransitGroups[heliname]
+    if not onboard or not onboard[groupname] then return end
+    if not heli:InAir() and RH.logistics.mashAt(heli:GetVec2(), RH.config.mash.radius) then
+      self:_RescuePilots(heli)
+      return
+    end
+    if not noreschedule then
+      self:ScheduleOnce(5, self._ScheduledSARFlight, self, heliname, groupname, false, false)
+    end
   end
 
   local addMenu = inst._AddMedevacMenuItem
@@ -98,6 +118,7 @@ function csar.installHooks(inst)
         csar.mapMenu[name] = true
         local root = MENU_GROUP:New(group, "CSAR")
         MENU_GROUP_COMMAND:New(group, "Show on map", root, csar.showOnMap)
+        MENU_GROUP_COMMAND:New(group, "Disembark", root, function() csar.disembark(group) end)
       end
     end
   end
@@ -155,6 +176,34 @@ function csar.list()
     end
   end
   return out
+end
+
+function csar.disembark(group)
+  local unit = group and group.GetFirstUnitAlive and group:GetFirstUnitAlive()
+  if not unit or not unit:IsAlive() then return end
+  local heliName = unit:GetName()
+  local inst = csar.instance
+  local onboard = inst and inst.inTransitGroups[heliName]
+  if not onboard or not next(onboard) then
+    RH.dcs.messageToUnit(heliName, "No rescued pilots aboard.", 8)
+    return
+  end
+  if unit:InAir() then
+    RH.dcs.messageToUnit(heliName, "Land before the pilots can get out.", 8)
+    return
+  end
+  local heading = unit:GetHeading() or 0
+  local drop = unit:GetCoordinate():Translate(20, (heading + 180) % 360)
+  local n = 0
+  for _, rec in pairs(onboard) do
+    n = n + 1
+    local zone = ZONE_RADIUS:New("RH_DISEMBARK_" .. math.random(1, 1000000), drop:GetVec2(), 15, true)
+    inst:SpawnCSARAtZone(zone, coalition.side.BLUE, rec.desc or rec.player or "Downed pilot", false, true, rec.player or rec.desc, rec.originalUnit, true)
+  end
+  inst.inTransitGroups[heliName] = nil
+  inst:_UpdateUnitCargoMass(heliName)
+  csar.manifests[heliName] = nil
+  RH.dcs.messageToUnit(heliName, string.format("%d pilot%s stepped out and can be picked up again.", n, n == 1 and "" or "s"), 12)
 end
 
 function csar.showOnMap()
