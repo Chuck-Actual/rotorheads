@@ -299,16 +299,16 @@ RH.config = {
     loadRadius = 150,
     displayCirclesFor = 60,
     -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
-    -- Fuel and weapons are not restocked. Those stay at whatever was hauled in.
     airframes = 999,
-    -- The pad is the heliport. The Humvee is the ground crew. The depot, ammo dump, and tent
-    -- are the fuel, ordnance, and repair points. Refuel only works while sitting on the pad.
+    -- Stocked at the pad: guns, the Apache 30mm, rockets, pylons, and pods. Not missiles, not fuel, not APKs.
+    supply = { shells = 5000, gunmounts = 99, nurs = 999, containers = 99, adapters = 99 },
+    -- Pad faces north. Tent, depots, and the Humvee sit on the west side and face east.
     services = {
-      { kind = "static", label = "Tent", typeName = "FARP Tent", shape = "PalatkaB", category = "Fortifications", dist = 50, bearing = 180 },
-      { kind = "static", label = "Fuel", typeName = "FARP Fuel Depot", shape = "GSM Rus", category = "Fortifications", dist = 70, bearing = 150 },
-      { kind = "static", label = "Ammo", typeName = "FARP Ammo Dump Coating", shape = "SetkaKP", category = "Fortifications", dist = 70, bearing = 210 },
-      { kind = "static", label = "Windsock", typeName = "Windsock", shape = "H-Windsock_RW", category = "Fortifications", dist = 40, bearing = 0 },
-      { kind = "vehicle", label = "Humvee", typeName = "Hummer", dist = 35, bearing = 100 },
+      { kind = "static", label = "Tent", typeName = "FARP Tent", shape = "PalatkaB", category = "Fortifications", dist = 70, bearing = 270, heading = 90 },
+      { kind = "static", label = "Fuel", typeName = "FARP Fuel Depot", shape = "GSM Rus", category = "Fortifications", dist = 75, bearing = 240, heading = 90 },
+      { kind = "static", label = "Ammo", typeName = "FARP Ammo Dump Coating", shape = "SetkaKP", category = "Fortifications", dist = 75, bearing = 300, heading = 90 },
+      { kind = "static", label = "Windsock", typeName = "Windsock", shape = "H-Windsock_RW", category = "Fortifications", dist = 50, bearing = 0, heading = 0 },
+      { kind = "vehicle", label = "Humvee", typeName = "Hummer", dist = 45, bearing = 270, heading = 90 },
     },
   },
 
@@ -552,6 +552,10 @@ function persistence.save()
   if RH.logistics and RH.logistics.captureStocks then RH.logistics.captureStocks() end
   RH.state.savedAt = RH.dcs.wallclock()
   local ok = RH.dcs.writeFile(persistence.path("campaign.lua"), util.serialize(RH.state))
+  if RH.ctld and RH.ctld.instance and RH.ctld.instance.__Save then
+    local inst = RH.ctld.instance
+    inst:__Save(1, inst.filepath, inst.filename)
+  end
   if ok then util.log("campaign saved") end
   return ok
 end
@@ -1167,17 +1171,17 @@ function dcs.spawnFarp(farp)
   helipad:InitShape("FARPS")
   -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
   helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
-  helipad:SpawnFromCoordinate(pad, 0, farp.name)
+  helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
   for _, piece in ipairs(RH.config.farp.services or {}) do
     local spot = pad:Translate(piece.dist or 40, piece.bearing or 0)
     local objectName = farp.name .. " " .. piece.label
     local ok, err = pcall(function()
       if piece.kind == "vehicle" then
-        dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.bearing)
+        dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.heading or 0)
       else
         local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", country.id.USA)
         if piece.shape then obj:InitShape(piece.shape) end
-        obj:SpawnFromCoordinate(spot, piece.bearing or 0, objectName)
+        obj:SpawnFromCoordinate(spot, piece.heading or 0, objectName)
       end
     end)
     if not ok then util.log("FARP piece %s failed: %s", objectName, tostring(err)) end
@@ -1214,6 +1218,20 @@ function dcs.applyWarehouse(farp, wh)
     end
   end
   dcs.topUpAirframes(wh)
+  dcs.seedFarpSupplies(wh)
+end
+
+function dcs.seedFarpSupplies(wh)
+  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
+  if not weapons or not RH.logistics or not RH.logistics.farpSupplyCount then return end
+  for category, group in pairs(weapons) do
+    if type(group) == "table" then
+      for _, item in pairs(group) do
+        local count = RH.logistics.farpSupplyCount(category, item)
+        if count then pcall(function() wh:setItem(item, count) end) end
+      end
+    end
+  end
 end
 
 function dcs.topUpAirframes(wh)
@@ -1230,7 +1248,13 @@ function dcs.captureFarpStock(farp)
   local ok, inv = pcall(function() return wh:getInventory() end)
   if not ok or type(inv) ~= "table" then return false end
   farp.liquids = inv.liquids or {}
-  farp.ammoItems = inv.weapon or inv.weapons or {}
+  local kept = {}
+  for item, amount in pairs(inv.weapon or inv.weapons or {}) do
+    if RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
+      kept[item] = amount
+    end
+  end
+  farp.ammoItems = kept
   dcs.topUpAirframes(wh)
   return true
 end
@@ -1491,6 +1515,22 @@ function logistics.captureStocks()
     local farp = RH.state.farps[name]
     if farp then RH.dcs.captureFarpStock(farp) end
   end
+end
+
+-- Guns, gun rounds, rockets, pylons, and pods are on the shelf. APKs are not.
+function logistics.farpSupplyCount(category, item)
+  if type(item) == "string" and string.find(string.upper(item), "APK", 1, true) then return nil end
+  local supply = fcfg().supply or {}
+  return supply[category]
+end
+
+-- Missiles stay at whatever was hauled in. Guns and rockets are restocked instead of saved.
+function logistics.keepHauledWeapon(item)
+  if type(item) ~= "string" then return false end
+  if string.find(string.upper(item), "APK", 1, true) then return false end
+  return string.find(item, "weapons.missiles.", 1, true) ~= nil
+    or string.find(item, "weapons.bombs.", 1, true) ~= nil
+    or string.find(item, "weapons.torpedoes.", 1, true) ~= nil
 end
 
 function logistics.hasWarehouseStock(farp)
@@ -2935,7 +2975,7 @@ function ctld.create()
   inst.C130basetype = inst.basetype
 
   inst.enableLoadSave = RH.dcs.filesEnabled()
-  inst.saveinterval = c.saveInterval
+  inst.saveinterval = 30
   inst.filepath = RH.dcs.saveDir()
   inst.filename = "ctld.csv"
 

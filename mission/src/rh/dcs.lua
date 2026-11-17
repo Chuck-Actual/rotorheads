@@ -595,17 +595,17 @@ function dcs.spawnFarp(farp)
   helipad:InitShape("FARPS")
   -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
   helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
-  helipad:SpawnFromCoordinate(pad, 0, farp.name)
+  helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
   for _, piece in ipairs(RH.config.farp.services or {}) do
     local spot = pad:Translate(piece.dist or 40, piece.bearing or 0)
     local objectName = farp.name .. " " .. piece.label
     local ok, err = pcall(function()
       if piece.kind == "vehicle" then
-        dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.bearing)
+        dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.heading or 0)
       else
         local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", country.id.USA)
         if piece.shape then obj:InitShape(piece.shape) end
-        obj:SpawnFromCoordinate(spot, piece.bearing or 0, objectName)
+        obj:SpawnFromCoordinate(spot, piece.heading or 0, objectName)
       end
     end)
     if not ok then util.log("FARP piece %s failed: %s", objectName, tostring(err)) end
@@ -642,6 +642,20 @@ function dcs.applyWarehouse(farp, wh)
     end
   end
   dcs.topUpAirframes(wh)
+  dcs.seedFarpSupplies(wh)
+end
+
+function dcs.seedFarpSupplies(wh)
+  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
+  if not weapons or not RH.logistics or not RH.logistics.farpSupplyCount then return end
+  for category, group in pairs(weapons) do
+    if type(group) == "table" then
+      for _, item in pairs(group) do
+        local count = RH.logistics.farpSupplyCount(category, item)
+        if count then pcall(function() wh:setItem(item, count) end) end
+      end
+    end
+  end
 end
 
 function dcs.topUpAirframes(wh)
@@ -658,7 +672,13 @@ function dcs.captureFarpStock(farp)
   local ok, inv = pcall(function() return wh:getInventory() end)
   if not ok or type(inv) ~= "table" then return false end
   farp.liquids = inv.liquids or {}
-  farp.ammoItems = inv.weapon or inv.weapons or {}
+  local kept = {}
+  for item, amount in pairs(inv.weapon or inv.weapons or {}) do
+    if RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
+      kept[item] = amount
+    end
+  end
+  farp.ammoItems = kept
   dcs.topUpAirframes(wh)
   return true
 end

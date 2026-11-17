@@ -108,16 +108,16 @@ RH.config = {
     loadRadius = 150,
     displayCirclesFor = 60,
     -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
-    -- Fuel and weapons are not restocked. Those stay at whatever was hauled in.
     airframes = 999,
-    -- The pad is the heliport. The Humvee is the ground crew. The depot, ammo dump, and tent
-    -- are the fuel, ordnance, and repair points. Refuel only works while sitting on the pad.
+    -- Stocked at the pad: guns, the Apache 30mm, rockets, pylons, and pods. Not missiles, not fuel, not APKs.
+    supply = { shells = 5000, gunmounts = 99, nurs = 999, containers = 99, adapters = 99 },
+    -- Pad faces north. Tent, depots, and the Humvee sit on the west side and face east.
     services = {
-      { kind = "static", label = "Tent", typeName = "FARP Tent", shape = "PalatkaB", category = "Fortifications", dist = 50, bearing = 180 },
-      { kind = "static", label = "Fuel", typeName = "FARP Fuel Depot", shape = "GSM Rus", category = "Fortifications", dist = 70, bearing = 150 },
-      { kind = "static", label = "Ammo", typeName = "FARP Ammo Dump Coating", shape = "SetkaKP", category = "Fortifications", dist = 70, bearing = 210 },
-      { kind = "static", label = "Windsock", typeName = "Windsock", shape = "H-Windsock_RW", category = "Fortifications", dist = 40, bearing = 0 },
-      { kind = "vehicle", label = "Humvee", typeName = "Hummer", dist = 35, bearing = 100 },
+      { kind = "static", label = "Tent", typeName = "FARP Tent", shape = "PalatkaB", category = "Fortifications", dist = 70, bearing = 270, heading = 90 },
+      { kind = "static", label = "Fuel", typeName = "FARP Fuel Depot", shape = "GSM Rus", category = "Fortifications", dist = 75, bearing = 240, heading = 90 },
+      { kind = "static", label = "Ammo", typeName = "FARP Ammo Dump Coating", shape = "SetkaKP", category = "Fortifications", dist = 75, bearing = 300, heading = 90 },
+      { kind = "static", label = "Windsock", typeName = "Windsock", shape = "H-Windsock_RW", category = "Fortifications", dist = 50, bearing = 0, heading = 0 },
+      { kind = "vehicle", label = "Humvee", typeName = "Hummer", dist = 45, bearing = 270, heading = 90 },
     },
   },
 

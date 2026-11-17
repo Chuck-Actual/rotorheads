@@ -239,6 +239,22 @@ function logistics.captureStocks()
   end
 end
 
+-- Guns, gun rounds, rockets, pylons, and pods are on the shelf. APKs are not.
+function logistics.farpSupplyCount(category, item)
+  if type(item) == "string" and string.find(string.upper(item), "APK", 1, true) then return nil end
+  local supply = fcfg().supply or {}
+  return supply[category]
+end
+
+-- Missiles stay at whatever was hauled in. Guns and rockets are restocked instead of saved.
+function logistics.keepHauledWeapon(item)
+  if type(item) ~= "string" then return false end
+  if string.find(string.upper(item), "APK", 1, true) then return false end
+  return string.find(item, "weapons.missiles.", 1, true) ~= nil
+    or string.find(item, "weapons.bombs.", 1, true) ~= nil
+    or string.find(item, "weapons.torpedoes.", 1, true) ~= nil
+end
+
 function logistics.hasWarehouseStock(farp)
   for _, n in pairs(farp.liquids or {}) do
     if type(n) == "number" and n > 0 then return true end

@@ -150,7 +150,7 @@ function ctld.create()
   inst.C130basetype = inst.basetype
 
   inst.enableLoadSave = RH.dcs.filesEnabled()
-  inst.saveinterval = c.saveInterval
+  inst.saveinterval = 30
   inst.filepath = RH.dcs.saveDir()
   inst.filename = "ctld.csv"
 

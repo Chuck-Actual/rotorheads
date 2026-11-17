@@ -79,6 +79,17 @@ T.test("building within 1 NM of a friendly airfield makes an LC", function()
   T.ok(why:find("1 mile"), why)
 end)
 
+T.test("FARP stocks guns and rockets, not missiles, fuel, or APKs", function()
+  T.fresh()
+  T.eq(RH.logistics.farpSupplyCount("shells", "weapons.shells.M230_HEDP M789"), 5000)
+  T.eq(RH.logistics.farpSupplyCount("nurs", "weapons.nurs.HYDRA_70_M151"), 999)
+  T.eq(RH.logistics.farpSupplyCount("containers", "weapons.containers.APK-9"), nil)
+  T.eq(RH.logistics.farpSupplyCount("missiles", "weapons.missiles.AGM_114K"), nil)
+  T.ok(RH.logistics.keepHauledWeapon("weapons.missiles.AGM_114K"))
+  T.ok(not RH.logistics.keepHauledWeapon("weapons.nurs.HYDRA_70_M151"))
+  T.ok(not RH.logistics.keepHauledWeapon("weapons.containers.APK-9"))
+end)
+
 T.test("a FARP brings the services DCS needs to rearm and refuel", function()
   T.fresh()
   local types = {}

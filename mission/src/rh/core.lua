@@ -88,6 +88,10 @@ function persistence.save()
   if RH.logistics and RH.logistics.captureStocks then RH.logistics.captureStocks() end
   RH.state.savedAt = RH.dcs.wallclock()
   local ok = RH.dcs.writeFile(persistence.path("campaign.lua"), util.serialize(RH.state))
+  if RH.ctld and RH.ctld.instance and RH.ctld.instance.__Save then
+    local inst = RH.ctld.instance
+    inst:__Save(1, inst.filepath, inst.filename)
+  end
   if ok then util.log("campaign saved") end
   return ok
 end
