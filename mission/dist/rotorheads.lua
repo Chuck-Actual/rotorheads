@@ -286,8 +286,8 @@ RH.config = {
     farpCrateMass = 400,
     -- A new FARP has to sit at least a mile from every FARP and every Logistics Center.
     minSeparation = 1609.344,
-    -- A field FARP this close to an airfield that still has no Logistics Center is refused.
-    minDistanceFarp = 15 * 1852,
+    -- Testing distance from a real airfield that still has no Logistics Center.
+    minDistanceFarp = 1 * 1852,
     -- Building inside this radius of an airfield reference point creates that airfield's Logistics Center.
     lcAirfieldRadius = 1 * 1852,
     -- A tent already placed on the airfield is the Logistics Center even if the zone sits off the beacon.
@@ -1011,12 +1011,36 @@ function dcs.redAircraft()
   return out
 end
 
+local function longestRunway(airbase)
+  if not airbase.getRunways then return 0 end
+  local ok, runways = pcall(function() return airbase:getRunways() end)
+  if not ok or type(runways) ~= "table" then return 0 end
+  local longest = 0
+  for _, runway in pairs(runways) do
+    local len = runway.length or runway.Length or 0
+    if type(len) == "number" and len > longest then longest = len end
+  end
+  return longest
+end
+
 function dcs.airbases()
   local out = {}
   for _, ab in ipairs(world.getAirbases()) do
     local p = ab:getPoint()
+    local name = ab:getName()
     local kind = ({ [0] = "airdrome", [1] = "helipad", [2] = "ship" })[ab:getDesc().category] or "helipad"
-    table.insert(out, { name = ab:getName(), point = { x = p.x, y = p.z }, kind = kind, coalition = SIDES[ab:getCoalition()] })
+    -- HS02 and the other helicopter pads are stored as airdromes, but they are not logistics airfields.
+    local logistics = kind == "airdrome"
+    local runway = longestRunway(ab)
+    if runway > 0 and runway < 1000 then logistics = false end
+    if string.match(name, "^HS%d") then logistics = false end
+    table.insert(out, {
+      name = name,
+      point = { x = p.x, y = p.z },
+      kind = kind,
+      coalition = SIDES[ab:getCoalition()],
+      logistics = logistics,
+    })
   end
   return out
 end
@@ -1298,7 +1322,7 @@ end
 function logistics.airfieldNear(point, radius)
   local best, bestDist
   for _, ab in ipairs(RH.dcs.airbases()) do
-    if ab.kind == "airdrome" then
+    if ab.kind == "airdrome" and ab.logistics ~= false then
       local d = util.distance(ab.point, point)
       if d <= radius and (not bestDist or d < bestDist) then best, bestDist = ab, d end
     end
@@ -1349,9 +1373,10 @@ local function airfieldHasLC(airfieldName)
 end
 
 -- Construction, testing rules:
---  * the first site within 1 NM of a friendly airfield becomes that airfield's Logistics Center;
+--  * the first site within 1 NM of a real friendly airfield becomes that airfield's Logistics Center;
+--  * helicopter pads such as HS02 are not airfields and cannot be a Logistics Center;
 --  * every other site must be at least 1 mile from every FARP and every Logistics Center;
---  * a site within 15 NM of an airfield that still has no Logistics Center is refused.
+--  * a site within 1 NM of a real airfield that still has no Logistics Center is refused.
 function logistics.validateFarpSite(point)
   local airfield = logistics.airfieldNear(point, fcfg().lcAirfieldRadius)
   if airfield and airfield.coalition == "red" then
@@ -1371,8 +1396,8 @@ function logistics.validateFarpSite(point)
   end
 
   for _, ab in ipairs(RH.dcs.airbases()) do
-    if ab.kind == "airdrome" and util.distance(ab.point, point) < fcfg().minDistanceFarp and not airfieldHasLC(ab.name) then
-      return false, "within 15 NM of " .. ab.name .. ", which has no Logistics Center yet"
+    if ab.kind == "airdrome" and ab.logistics ~= false and util.distance(ab.point, point) < fcfg().minDistanceFarp and not airfieldHasLC(ab.name) then
+      return false, "within 1 NM of " .. ab.name .. ", which has no Logistics Center yet"
     end
   end
   return true, "farp"
@@ -2983,11 +3008,13 @@ function ctld.installHooks(inst)
     local player = Unit and Unit:GetPlayerName() or "A pilot"
     local ok, reason
     if kit == "farp" then
-      if RH.logistics.farpNear(point, 400) then
-        Vehicle:Destroy(false)
-        return
+      -- The spawned group is only the Humvee template CTLD needs in order to finish the build.
+      Vehicle:Destroy(false)
+      if not RH.logistics.farpNear(point, 400) then
+        local farp, reason = RH.logistics.buildFarp(point, player)
+        if not farp then ctld.reply(Group, "FARP was not marked: " .. tostring(reason)) end
       end
-      ok, reason = RH.logistics.buildFarp(point, player)
+      return
     elseif kit == "mash" then
       ok, reason = RH.logistics.buildMash(point, player)
     elseif kit == "outpost" then

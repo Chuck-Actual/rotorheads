@@ -440,12 +440,36 @@ function dcs.redAircraft()
   return out
 end
 
+local function longestRunway(airbase)
+  if not airbase.getRunways then return 0 end
+  local ok, runways = pcall(function() return airbase:getRunways() end)
+  if not ok or type(runways) ~= "table" then return 0 end
+  local longest = 0
+  for _, runway in pairs(runways) do
+    local len = runway.length or runway.Length or 0
+    if type(len) == "number" and len > longest then longest = len end
+  end
+  return longest
+end
+
 function dcs.airbases()
   local out = {}
   for _, ab in ipairs(world.getAirbases()) do
     local p = ab:getPoint()
+    local name = ab:getName()
     local kind = ({ [0] = "airdrome", [1] = "helipad", [2] = "ship" })[ab:getDesc().category] or "helipad"
-    table.insert(out, { name = ab:getName(), point = { x = p.x, y = p.z }, kind = kind, coalition = SIDES[ab:getCoalition()] })
+    -- HS02 and the other helicopter pads are stored as airdromes, but they are not logistics airfields.
+    local logistics = kind == "airdrome"
+    local runway = longestRunway(ab)
+    if runway > 0 and runway < 1000 then logistics = false end
+    if string.match(name, "^HS%d") then logistics = false end
+    table.insert(out, {
+      name = name,
+      point = { x = p.x, y = p.z },
+      kind = kind,
+      coalition = SIDES[ab:getCoalition()],
+      logistics = logistics,
+    })
   end
   return out
 end

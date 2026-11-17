@@ -267,11 +267,13 @@ function ctld.installHooks(inst)
     local player = Unit and Unit:GetPlayerName() or "A pilot"
     local ok, reason
     if kit == "farp" then
-      if RH.logistics.farpNear(point, 400) then
-        Vehicle:Destroy(false)
-        return
+      -- The spawned group is only the Humvee template CTLD needs in order to finish the build.
+      Vehicle:Destroy(false)
+      if not RH.logistics.farpNear(point, 400) then
+        local farp, reason = RH.logistics.buildFarp(point, player)
+        if not farp then ctld.reply(Group, "FARP was not marked: " .. tostring(reason)) end
       end
-      ok, reason = RH.logistics.buildFarp(point, player)
+      return
     elseif kit == "mash" then
       ok, reason = RH.logistics.buildMash(point, player)
     elseif kit == "outpost" then

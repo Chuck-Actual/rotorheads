@@ -95,8 +95,8 @@ RH.config = {
     farpCrateMass = 400,
     -- A new FARP has to sit at least a mile from every FARP and every Logistics Center.
     minSeparation = 1609.344,
-    -- A field FARP this close to an airfield that still has no Logistics Center is refused.
-    minDistanceFarp = 15 * 1852,
+    -- Testing distance from a real airfield that still has no Logistics Center.
+    minDistanceFarp = 1 * 1852,
     -- Building inside this radius of an airfield reference point creates that airfield's Logistics Center.
     lcAirfieldRadius = 1 * 1852,
     -- A tent already placed on the airfield is the Logistics Center even if the zone sits off the beacon.

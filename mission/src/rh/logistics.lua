@@ -81,7 +81,7 @@ end
 function logistics.airfieldNear(point, radius)
   local best, bestDist
   for _, ab in ipairs(RH.dcs.airbases()) do
-    if ab.kind == "airdrome" then
+    if ab.kind == "airdrome" and ab.logistics ~= false then
       local d = util.distance(ab.point, point)
       if d <= radius and (not bestDist or d < bestDist) then best, bestDist = ab, d end
     end
@@ -132,9 +132,10 @@ local function airfieldHasLC(airfieldName)
 end
 
 -- Construction, testing rules:
---  * the first site within 1 NM of a friendly airfield becomes that airfield's Logistics Center;
+--  * the first site within 1 NM of a real friendly airfield becomes that airfield's Logistics Center;
+--  * helicopter pads such as HS02 are not airfields and cannot be a Logistics Center;
 --  * every other site must be at least 1 mile from every FARP and every Logistics Center;
---  * a site within 15 NM of an airfield that still has no Logistics Center is refused.
+--  * a site within 1 NM of a real airfield that still has no Logistics Center is refused.
 function logistics.validateFarpSite(point)
   local airfield = logistics.airfieldNear(point, fcfg().lcAirfieldRadius)
   if airfield and airfield.coalition == "red" then
@@ -154,8 +155,8 @@ function logistics.validateFarpSite(point)
   end
 
   for _, ab in ipairs(RH.dcs.airbases()) do
-    if ab.kind == "airdrome" and util.distance(ab.point, point) < fcfg().minDistanceFarp and not airfieldHasLC(ab.name) then
-      return false, "within 15 NM of " .. ab.name .. ", which has no Logistics Center yet"
+    if ab.kind == "airdrome" and ab.logistics ~= false and util.distance(ab.point, point) < fcfg().minDistanceFarp and not airfieldHasLC(ab.name) then
+      return false, "within 1 NM of " .. ab.name .. ", which has no Logistics Center yet"
     end
   end
   return true, "farp"
