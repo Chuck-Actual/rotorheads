@@ -99,9 +99,14 @@ RH.config = {
     startingCrates = 40,
     maxCrates = 80,
     zoneRadius = 250,
-    -- Crates can only be picked up this close to the logistics tent, not anywhere in the big FARP zone.
+    -- Crates and troops load within this distance of the logistics tent.
     loadRadius = 150,
     displayCirclesFor = 60,
+  },
+
+  csar = {
+    -- Each player keeps this many downed pilots. A newer death does not erase the earlier ones.
+    keepPerPlayer = 3,
   },
 
   mash = {

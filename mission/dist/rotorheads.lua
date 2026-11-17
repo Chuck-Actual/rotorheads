@@ -290,9 +290,14 @@ RH.config = {
     startingCrates = 40,
     maxCrates = 80,
     zoneRadius = 250,
-    -- Crates can only be picked up this close to the logistics tent, not anywhere in the big FARP zone.
+    -- Crates and troops load within this distance of the logistics tent.
     loadRadius = 150,
     displayCirclesFor = 60,
+  },
+
+  csar = {
+    -- Each player keeps this many downed pilots. A newer death does not erase the earlier ones.
+    keepPerPlayer = 3,
   },
 
   mash = {
@@ -726,6 +731,30 @@ function dcs.nearestZone(prefix, point)
   return best
 end
 
+function dcs.staticObjects()
+  local out = {}
+  if not coalition or not coalition.getStaticObjects then return out end
+  for _, side in ipairs({ coalition.side.BLUE, coalition.side.NEUTRAL, coalition.side.RED }) do
+    local ok, list = pcall(coalition.getStaticObjects, side)
+    if ok and list then
+      for _, s in ipairs(list) do
+        if s and s:isExist() then
+          local p = s:getPoint()
+          local desc = s.getDesc and s:getDesc() or nil
+          table.insert(out, {
+            name = s:getName(),
+            typeName = s:getTypeName(),
+            display = desc and (desc.displayName or desc.typeName) or "",
+            x = p.x,
+            y = p.z,
+          })
+        end
+      end
+    end
+  end
+  return out
+end
+
 function dcs.staticsInZone(zone, side)
   local out = {}
   local radius = zone.radius > 0 and zone.radius or 500
@@ -1102,7 +1131,12 @@ end
 function logistics.register(name, point, opts)
   opts = opts or {}
   local existing = RH.state.farps[name]
-  if existing then return existing end
+  if existing then
+    -- The mission-editor zone wins over a saved position, so moving the zone moves the FARP.
+    existing.x, existing.y = point.x, point.y
+    if opts.zoneRadius then existing.zoneRadius = opts.zoneRadius end
+    return existing
+  end
   local farp = {
     name = name,
     x = point.x,
@@ -1110,6 +1144,7 @@ function logistics.register(name, point, opts)
     lc = opts.lc or false,
     built = opts.built or false,
     airbase = opts.airbase,
+    zoneRadius = opts.zoneRadius,
     crates = opts.lc and -1 or (opts.crates or fcfg().startingCrates),
   }
   RH.state.farps[name] = farp
@@ -1120,7 +1155,11 @@ function logistics.discoverPlaced()
   local prefix = RH.config.prefixes.farp
   for _, zone in ipairs(RH.dcs.zonesWithPrefix(prefix)) do
     local airbase = logistics.airfieldNear(zone.point, fcfg().lcAirfieldRadius)
-    logistics.register(zone.name, zone.point, { lc = airbase ~= nil, airbase = airbase and airbase.name })
+    logistics.register(zone.name, zone.point, {
+      lc = airbase ~= nil,
+      airbase = airbase and airbase.name,
+      zoneRadius = zone.radius,
+    })
   end
 end
 
@@ -1140,7 +1179,13 @@ function logistics.farpAt(point, radius)
   local best, bestDist
   for _, farp in pairs(RH.state.farps) do
     local d = util.distance(farp, point)
-    if d <= radius and (not bestDist or d < bestDist) then best, bestDist = farp, d end
+    local covered = d <= radius
+    if not covered then
+      for _, lp in ipairs(farp.loadPoints or {}) do
+        if util.distance(lp, point) <= fcfg().loadRadius then covered = true break end
+      end
+    end
+    if covered and (not bestDist or d < bestDist) then best, bestDist = farp, d end
   end
   return best
 end
@@ -2517,14 +2562,49 @@ local function templateKit(groupName)
   end
 end
 
+local function isLogisticsTent(static)
+  local name = string.lower(static.name or "")
+  local kind = string.lower((static.typeName or "") .. " " .. (static.display or ""))
+  -- The hospital tent is spawned by us and named "<MASH> tent".
+  if string.sub(name, -5) == " tent" then return false end
+  if string.find(kind, "tent04", 1, true) or string.find(kind, "m92", 1, true) then return false end
+  if string.find(kind, "tent", 1, true) or string.find(kind, "farp", 1, true) then return true end
+  if string.find(name, "tent", 1, true) or string.find(name, "farp", 1, true) then return true end
+  return false
+end
+
+-- The 150 m load circle sits on the logistics tent, not on the middle of a large trigger zone.
+function ctld.tentPoints(farp)
+  local search = math.min(math.max(farp.zoneRadius or 0, 2000), 4000)
+  local tents = {}
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    if isLogisticsTent(static) and util.distance(static, farp) <= search then
+      table.insert(tents, static)
+    end
+  end
+  if #tents > 0 then return tents, true end
+  return { { x = farp.x, y = farp.y } }, false
+end
+
 function ctld.addFarpZone(farp)
   if not ctld.instance then return end
-  -- A small zone of our own. The mission-editor zone can be huge, and crates should only load at the tent.
-  local zoneName = "RH_LOAD_" .. farp.name
-  if not ZONE:FindByName(zoneName) then
-    ZONE_RADIUS:New(zoneName, { x = farp.x, y = farp.y }, RH.config.farp.loadRadius)
+  local points, atTent = ctld.tentPoints(farp)
+  farp.loadPoints = points
+  local radius = RH.config.farp.loadRadius
+  for i, point in ipairs(points) do
+    local zoneName = "RH_LOAD_" .. farp.name .. "_" .. i
+    local zone = ZONE:FindByName(zoneName)
+    if zone and zone.UpdateFromVec2 then
+      zone:UpdateFromVec2({ x = point.x, y = point.y }, radius)
+    else
+      ZONE_RADIUS:New(zoneName, { x = point.x, y = point.y }, radius)
+    end
+    ctld.instance:AddCTLDZone(zoneName, CTLD.CargoZoneType.LOAD, SMOKECOLOR.Blue, true, false)
+    local id = "rh-load-" .. farp.name .. "-" .. i
+    RH.dcs.drawCircle(id, "blue", point, radius, { 0, 0.55, 1, 1 }, { 0, 0.55, 1, 0.18 }, "Load")
+    RH.after(60, function() RH.dcs.removeDrawing(id) end)
   end
-  ctld.instance:AddCTLDZone(zoneName, CTLD.CargoZoneType.LOAD, SMOKECOLOR.Blue, true, true)
+  return atTent
 end
 
 function ctld.reply(Group, text)
@@ -2587,7 +2667,14 @@ function ctld.create()
   end
 
   ctld.instance = inst
-  for _, farp in ipairs(RH.logistics.farps()) do ctld.addFarpZone(farp) end
+  local notes = {}
+  for _, farp in ipairs(RH.logistics.farps()) do
+    local atTent = ctld.addFarpZone(farp)
+    table.insert(notes, farp.name .. (atTent and " (tent)" or " (zone center, no tent found)"))
+  end
+  if #notes > 0 then
+    RH.dcs.message("blue", "Logistics load zones, 150 m, shown in blue for 60 seconds: " .. table.concat(notes, ", "), 25)
+  end
   ctld.installHooks(inst)
   inst:__Start(2)
   if inst.enableLoadSave then inst:__Load(10) end
@@ -2714,7 +2801,7 @@ local util = RH.util
 
 -- MOOSE CSAR setup plus the Rotorheads extras: lives returned on rescue, MASH capacity of 30,
 -- MASH -> airfield transport tasks, stranded-crew CSARs, and the -extract marker.
-local csar = { instance = nil, manifests = {} }
+local csar = { instance = nil, manifests = {}, duty = {} }
 RH.csar = csar
 
 local function pilotRecord(groupName)
@@ -2818,17 +2905,63 @@ function csar.installHooks(inst)
     end
   end
 
-  local addMenu = inst._AddMedevacMenuItem
-  csar.mapMenu = {}
-  function inst:_AddMedevacMenuItem(...)
-    addMenu(self, ...)
-    for _, group in pairs(self.allheligroupset:GetSetObjects() or {}) do
-      local name = group:GetName()
-      if self.addedTo[name] and not csar.mapMenu[name] then
-        csar.mapMenu[name] = true
-        local root = MENU_GROUP:New(group, "CSAR")
-        MENU_GROUP_COMMAND:New(group, "Show on map", root, csar.showOnMap)
-        MENU_GROUP_COMMAND:New(group, "Disembark", root, function() csar.disembark(group) end)
+  -- MOOSE deletes the previous pilot for this player before spawning the new one. Hide those
+  -- records so the last few deaths all stay on the map.
+  local stockHandler = inst._EventHandler
+  function inst:_EventHandler(event)
+    local player = event and event.IniPlayerName
+    local crash = event and (event.id == EVENTS.PilotDead or event.id == EVENTS.Ejection)
+    local hidden = {}
+    if crash and player then
+      for _, pilot in pairs(self.downedPilots or {}) do
+        if pilot.alive and pilot.player == player then
+          hidden[pilot] = player
+          pilot.player = "\1" .. tostring(pilot.name)
+        end
+      end
+    end
+    local ok, err = pcall(stockHandler, self, event)
+    for pilot, name in pairs(hidden) do
+      if type(pilot.player) == "string" and string.sub(pilot.player, 1, 1) == "\1" then pilot.player = name end
+    end
+    if crash and player then csar.trimPlayerPilots(player) end
+    if not ok then error(err) end
+  end
+
+  local stockStatus = inst._CheckWoundedGroupStatus
+  function inst:_CheckWoundedGroupStatus(heliname, woundedgroupname)
+    if not csar.unitOnDuty(heliname) then return end
+    return stockStatus(self, heliname, woundedgroupname)
+  end
+
+  local stockAll = inst._DisplayToAllSAR
+  function inst:_DisplayToAllSAR(message, side, messagetime, toSrs, toScreen)
+    local original = self.csarUnits
+    local onDuty = {}
+    for name in pairs(original or {}) do
+      if csar.unitOnDuty(name) then onDuty[name] = name end
+    end
+    self.csarUnits = onDuty
+    local ok, err = pcall(stockAll, self, message, side, messagetime, toSrs, toScreen)
+    self.csarUnits = original
+    if not ok then error(err) end
+  end
+
+  function inst:_AddMedevacMenuItem()
+    local groups = self.allheligroupset and self.allheligroupset:GetSetObjects() or {}
+    for _, group in pairs(groups) do
+      local unit = group.GetFirstUnitAlive and group:GetFirstUnitAlive()
+      if unit and unit:IsAlive() and unit:IsPlayer() then
+        local cap = self.AircraftType[unit:GetTypeName()]
+        if cap == nil or cap > 0 then
+          local unitName = unit:GetName()
+          self.csarUnits = self.csarUnits or {}
+          self.csarUnits[unitName] = unitName
+          if self.addedTo[group:GetName()] == nil then
+            self.addedTo[group:GetName()] = true
+            csar.buildMenu(self, group, unitName)
+          end
+        end
       end
     end
   end
@@ -2888,6 +3021,101 @@ function csar.list()
   return out
 end
 
+function csar.playerOf(unitName)
+  local unit = UNIT and UNIT.FindByName and UNIT:FindByName(unitName)
+  local player = unit and unit.GetPlayerName and unit:GetPlayerName()
+  if player and player ~= "" then return player end
+  return nil
+end
+
+function csar.unitOnDuty(unitName)
+  local player = csar.playerOf(unitName)
+  return player ~= nil and csar.duty[player] == true
+end
+
+function csar.setDuty(unitName, on)
+  local player = csar.playerOf(unitName) or unitName
+  csar.duty[player] = on and true or nil
+  if on then
+    RH.dcs.messageToUnit(unitName, "You are on CSAR duty. You will hear pilots you fly over, and you can pick them up.", 12)
+  else
+    RH.dcs.messageToUnit(unitName, "You are off CSAR duty. Pilot calls will stay quiet.", 12)
+  end
+end
+
+function csar.requireDuty(unitName)
+  if csar.unitOnDuty(unitName) then return true end
+  RH.dcs.messageToUnit(unitName, "Report on duty under CSAR before running a rescue.", 8)
+  return false
+end
+
+function csar.trimPlayerPilots(player)
+  local inst = csar.instance
+  if not inst then return end
+  local mine = {}
+  for _, pilot in pairs(inst.downedPilots or {}) do
+    if pilot.alive and pilot.player == player then table.insert(mine, pilot) end
+  end
+  table.sort(mine, function(a, b) return (a.index or 0) < (b.index or 0) end)
+  local keep = RH.config.csar.keepPerPlayer or 3
+  while #mine > keep do
+    local old = table.remove(mine, 1)
+    if old.group and old.group.Destroy then old.group:Destroy(false) end
+    old.alive = false
+    inst:_RemoveNameFromDownedPilots(old.name, true)
+  end
+end
+
+function csar.buildMenu(inst, group, unitName)
+  local root = MENU_GROUP:New(group, "CSAR")
+  MENU_GROUP_COMMAND:New(group, "Report on duty", root, csar.setDuty, unitName, true)
+  MENU_GROUP_COMMAND:New(group, "Report off duty", root, csar.setDuty, unitName, false)
+  MENU_GROUP_COMMAND:New(group, "Show on map", root, function()
+    if csar.requireDuty(unitName) then csar.showOnMap() end
+  end)
+  MENU_GROUP_COMMAND:New(group, "Disembark", root, function()
+    if csar.requireDuty(unitName) then csar.disembark(group) end
+  end)
+  MENU_GROUP_COMMAND:New(group, "List active CSAR", root, function()
+    if csar.requireDuty(unitName) then inst:_DisplayActiveSAR(unitName) end
+  end)
+  MENU_GROUP_COMMAND:New(group, "Check onboard", root, function()
+    if csar.requireDuty(unitName) then inst:_CheckOnboard(unitName) end
+  end)
+  MENU_GROUP_COMMAND:New(group, "Request signal flare", root, function()
+    if csar.requireDuty(unitName) then inst:_SignalFlare(unitName) end
+  end)
+  MENU_GROUP_COMMAND:New(group, "Request smoke", root, function()
+    if csar.requireDuty(unitName) then inst:_Reqsmoke(unitName) end
+  end)
+
+  local mash = MENU_GROUP:New(group, "MASH", root)
+  MENU_GROUP_COMMAND:New(group, "Check MASH status", mash, function()
+    RH.dcs.messageToUnit(unitName, RH.logistics.mashStatus(), 20)
+  end)
+  MENU_GROUP_COMMAND:New(group, "Transport task: load patients", mash, function()
+    csar.loadPatients(unitName)
+  end)
+  MENU_GROUP_COMMAND:New(group, "Smoke closest MASH", mash, function()
+    inst:_ReqsmokeMash(unitName)
+  end)
+end
+
+function csar.loadPatients(unitName)
+  local unit = Unit.getByName(unitName)
+  if not unit then return end
+  local pos = util.toVec2(unit:getPoint())
+  local mashName = RH.logistics.mashAt(pos, RH.config.mash.radius)
+  if not mashName or unit:inAir() then
+    RH.dcs.messageToUnit(unitName, "Land at a MASH to start a transport task.", 10)
+    return
+  end
+  local cap = (RH.config.airframes[unit:getTypeName()] or {}).csar or 6
+  local taken = RH.logistics.startTransport(unitName, mashName, cap)
+  csar.refreshMashAvailability()
+  RH.dcs.messageToUnit(unitName, string.format("%d patients loaded from %s. Fly them to an airfield.", taken, mashName), 15)
+end
+
 function csar.disembark(group)
   local unit = group and group.GetFirstUnitAlive and group:GetFirstUnitAlive()
   if not unit or not unit:IsAlive() then return end
@@ -2945,28 +3173,6 @@ function csar.movePilotsTo(point, range, maxPilots)
   return moved
 end
 
--- F10 > CSAR extras: MASH status and transport tasks.
-function csar.addMenus(groupId, unitName)
-  local root = missionCommands.addSubMenuForGroup(groupId, "MASH")
-  missionCommands.addCommandForGroup(groupId, "Check MASH status", root, function()
-    RH.dcs.messageToUnit(unitName, RH.logistics.mashStatus(), 20)
-  end)
-  missionCommands.addCommandForGroup(groupId, "Transport task: load patients", root, function()
-    local unit = Unit.getByName(unitName)
-    if not unit then return end
-    local pos = util.toVec2(unit:getPoint())
-    local mashName = RH.logistics.mashAt(pos, 300)
-    if not mashName or unit:inAir() then
-      RH.dcs.messageToUnit(unitName, "Land at a MASH to start a transport task.", 10)
-      return
-    end
-    local cap = (RH.config.airframes[unit:getTypeName()] or {}).csar or 6
-    local taken = RH.logistics.startTransport(unitName, mashName, cap)
-    csar.refreshMashAvailability()
-    RH.dcs.messageToUnit(unitName, string.format("%d patients loaded from %s. Fly them to an airfield.", taken, mashName), 15)
-  end)
-end
-
 function csar.onLand(e)
   if not e.initiatorName or not RH.logistics.transports[e.initiatorName] then return end
   if e.placeKind == "airdrome" or e.placeKind == "ship" then
@@ -2975,16 +3181,9 @@ function csar.onLand(e)
   end
 end
 
-function csar.onBirth(e)
-  if e.playerName and e.initiatorCoalition == "blue" and e.groupId and (e.initiatorCategory == "helicopter" or e.initiatorCategory == "plane") then
-    csar.addMenus(e.groupId, e.initiatorName)
-  end
-end
-
 function csar.start()
   csar.create()
   RH.events.on("land", csar.onLand)
-  RH.events.on("birth", csar.onBirth)
 end
 
 return csar
@@ -3062,7 +3261,7 @@ function RH.start()
   RH.persistence.start()
 
   RH.persistence.save()
-  RH.dcs.message("all", RH.config.campaignName .. " is live. Type -lives, -farps or -mash in chat; F10 markers: -smoke,red  -illumination  -wpzone  -farp?  -extract", 30)
+  RH.dcs.message("all", RH.config.campaignName .. " is live. F10 > CSAR > Report on duty to hear downed pilots. Chat: -lives, -farps, -mash", 30)
 end
 
 return RH

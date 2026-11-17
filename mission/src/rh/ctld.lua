@@ -19,14 +19,49 @@ local function templateKit(groupName)
   end
 end
 
+local function isLogisticsTent(static)
+  local name = string.lower(static.name or "")
+  local kind = string.lower((static.typeName or "") .. " " .. (static.display or ""))
+  -- The hospital tent is spawned by us and named "<MASH> tent".
+  if string.sub(name, -5) == " tent" then return false end
+  if string.find(kind, "tent04", 1, true) or string.find(kind, "m92", 1, true) then return false end
+  if string.find(kind, "tent", 1, true) or string.find(kind, "farp", 1, true) then return true end
+  if string.find(name, "tent", 1, true) or string.find(name, "farp", 1, true) then return true end
+  return false
+end
+
+-- The 150 m load circle sits on the logistics tent, not on the middle of a large trigger zone.
+function ctld.tentPoints(farp)
+  local search = math.min(math.max(farp.zoneRadius or 0, 2000), 4000)
+  local tents = {}
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    if isLogisticsTent(static) and util.distance(static, farp) <= search then
+      table.insert(tents, static)
+    end
+  end
+  if #tents > 0 then return tents, true end
+  return { { x = farp.x, y = farp.y } }, false
+end
+
 function ctld.addFarpZone(farp)
   if not ctld.instance then return end
-  -- A small zone of our own. The mission-editor zone can be huge, and crates should only load at the tent.
-  local zoneName = "RH_LOAD_" .. farp.name
-  if not ZONE:FindByName(zoneName) then
-    ZONE_RADIUS:New(zoneName, { x = farp.x, y = farp.y }, RH.config.farp.loadRadius)
+  local points, atTent = ctld.tentPoints(farp)
+  farp.loadPoints = points
+  local radius = RH.config.farp.loadRadius
+  for i, point in ipairs(points) do
+    local zoneName = "RH_LOAD_" .. farp.name .. "_" .. i
+    local zone = ZONE:FindByName(zoneName)
+    if zone and zone.UpdateFromVec2 then
+      zone:UpdateFromVec2({ x = point.x, y = point.y }, radius)
+    else
+      ZONE_RADIUS:New(zoneName, { x = point.x, y = point.y }, radius)
+    end
+    ctld.instance:AddCTLDZone(zoneName, CTLD.CargoZoneType.LOAD, SMOKECOLOR.Blue, true, false)
+    local id = "rh-load-" .. farp.name .. "-" .. i
+    RH.dcs.drawCircle(id, "blue", point, radius, { 0, 0.55, 1, 1 }, { 0, 0.55, 1, 0.18 }, "Load")
+    RH.after(60, function() RH.dcs.removeDrawing(id) end)
   end
-  ctld.instance:AddCTLDZone(zoneName, CTLD.CargoZoneType.LOAD, SMOKECOLOR.Blue, true, true)
+  return atTent
 end
 
 function ctld.reply(Group, text)
@@ -89,7 +124,14 @@ function ctld.create()
   end
 
   ctld.instance = inst
-  for _, farp in ipairs(RH.logistics.farps()) do ctld.addFarpZone(farp) end
+  local notes = {}
+  for _, farp in ipairs(RH.logistics.farps()) do
+    local atTent = ctld.addFarpZone(farp)
+    table.insert(notes, farp.name .. (atTent and " (tent)" or " (zone center, no tent found)"))
+  end
+  if #notes > 0 then
+    RH.dcs.message("blue", "Logistics load zones, 150 m, shown in blue for 60 seconds: " .. table.concat(notes, ", "), 25)
+  end
   ctld.installHooks(inst)
   inst:__Start(2)
   if inst.enableLoadSave then inst:__Load(10) end

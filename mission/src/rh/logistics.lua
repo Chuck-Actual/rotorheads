@@ -21,7 +21,12 @@ end
 function logistics.register(name, point, opts)
   opts = opts or {}
   local existing = RH.state.farps[name]
-  if existing then return existing end
+  if existing then
+    -- The mission-editor zone wins over a saved position, so moving the zone moves the FARP.
+    existing.x, existing.y = point.x, point.y
+    if opts.zoneRadius then existing.zoneRadius = opts.zoneRadius end
+    return existing
+  end
   local farp = {
     name = name,
     x = point.x,
@@ -29,6 +34,7 @@ function logistics.register(name, point, opts)
     lc = opts.lc or false,
     built = opts.built or false,
     airbase = opts.airbase,
+    zoneRadius = opts.zoneRadius,
     crates = opts.lc and -1 or (opts.crates or fcfg().startingCrates),
   }
   RH.state.farps[name] = farp
@@ -39,7 +45,11 @@ function logistics.discoverPlaced()
   local prefix = RH.config.prefixes.farp
   for _, zone in ipairs(RH.dcs.zonesWithPrefix(prefix)) do
     local airbase = logistics.airfieldNear(zone.point, fcfg().lcAirfieldRadius)
-    logistics.register(zone.name, zone.point, { lc = airbase ~= nil, airbase = airbase and airbase.name })
+    logistics.register(zone.name, zone.point, {
+      lc = airbase ~= nil,
+      airbase = airbase and airbase.name,
+      zoneRadius = zone.radius,
+    })
   end
 end
 
@@ -59,7 +69,13 @@ function logistics.farpAt(point, radius)
   local best, bestDist
   for _, farp in pairs(RH.state.farps) do
     local d = util.distance(farp, point)
-    if d <= radius and (not bestDist or d < bestDist) then best, bestDist = farp, d end
+    local covered = d <= radius
+    if not covered then
+      for _, lp in ipairs(farp.loadPoints or {}) do
+        if util.distance(lp, point) <= fcfg().loadRadius then covered = true break end
+      end
+    end
+    if covered and (not bestDist or d < bestDist) then best, bestDist = farp, d end
   end
   return best
 end

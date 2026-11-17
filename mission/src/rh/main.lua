@@ -63,7 +63,7 @@ function RH.start()
   RH.persistence.start()
 
   RH.persistence.save()
-  RH.dcs.message("all", RH.config.campaignName .. " is live. Type -lives, -farps or -mash in chat; F10 markers: -smoke,red  -illumination  -wpzone  -farp?  -extract", 30)
+  RH.dcs.message("all", RH.config.campaignName .. " is live. F10 > CSAR > Report on duty to hear downed pilots. Chat: -lives, -farps, -mash", 30)
 end
 
 return RH

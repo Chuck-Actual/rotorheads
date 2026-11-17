@@ -184,6 +184,30 @@ function dcs.nearestZone(prefix, point)
   return best
 end
 
+function dcs.staticObjects()
+  local out = {}
+  if not coalition or not coalition.getStaticObjects then return out end
+  for _, side in ipairs({ coalition.side.BLUE, coalition.side.NEUTRAL, coalition.side.RED }) do
+    local ok, list = pcall(coalition.getStaticObjects, side)
+    if ok and list then
+      for _, s in ipairs(list) do
+        if s and s:isExist() then
+          local p = s:getPoint()
+          local desc = s.getDesc and s:getDesc() or nil
+          table.insert(out, {
+            name = s:getName(),
+            typeName = s:getTypeName(),
+            display = desc and (desc.displayName or desc.typeName) or "",
+            x = p.x,
+            y = p.z,
+          })
+        end
+      end
+    end
+  end
+  return out
+end
+
 function dcs.staticsInZone(zone, side)
   local out = {}
   local radius = zone.radius > 0 and zone.radius or 500
