@@ -35,6 +35,12 @@ local function restart(reason)
   net.load_mission(DCS.getMissionFilename())
 end
 
+function RHHook.onSimulationStop()
+  if RHHook.shutdownSent then return end
+  RHHook.shutdownSent = true
+  toMission("RH.shutdown()")
+end
+
 function RHHook.onSimulationStart()
   RHHook.warned = {}
   RHHook.shutdownSent = false

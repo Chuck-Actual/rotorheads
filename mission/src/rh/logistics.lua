@@ -185,8 +185,9 @@ function logistics.buildFarp(point, builtBy)
   })
   RH.dcs.drawCircle("pending-" .. name, "blue", farp, 600, { 0, 0.7, 1, 1 }, { 0, 0.7, 1, 0.15 }, name .. " (next restart)")
   RH.dcs.smoke(farp, RH.config.markers.smokeColors.green)
+  if RH.persistence and RH.persistence.save then RH.persistence.save() end
   RH.dcs.message("blue", string.format(
-    "%s marked %s. Restart the mission to build it. It will not appear in the mission editor. The restart spawns the pad on dynamic spawn, plus a tent, Humvee, M818, fuel depot, and ammo dump, with no fuel and no ammo.",
+    "%s marked %s and saved it. Restart the mission to build it. It will not appear in the mission editor. The restart spawns the pad on dynamic spawn, plus a tent, Humvee, M818, fuel depot, and ammo dump, with no fuel and no ammo.",
     builtBy or "A pilot", name), 30)
   RH.dcs.notify("farp_marked", { farp = name, kind = kind })
   return farp
@@ -206,13 +207,25 @@ end
 
 function logistics.spawnBuilt()
   logistics.sessionSpawned = {}
+  local marked = {}
   for _, farp in pairs(RH.state.farps) do
-    if farp.pending or farp.built then
-      RH.dcs.spawnFarp(farp)
+    if farp.pending or farp.built then table.insert(marked, farp) end
+  end
+  if #marked == 0 then
+    RH.dcs.message("blue", "No marked FARP in the save.", 20)
+    return
+  end
+  for _, farp in ipairs(marked) do
+    local ok, err = pcall(RH.dcs.spawnFarp, farp)
+    if ok then
       logistics.sessionSpawned[farp.name] = true
       farp.pending = false
       farp.built = true
       RH.dcs.removeDrawing("pending-" .. farp.name)
+      RH.dcs.message("blue", farp.name .. " is up. Dynamic spawn, no fuel or ammo yet.", 25)
+    else
+      util.log("spawn %s failed: %s", farp.name, tostring(err))
+      RH.dcs.message("blue", string.format("%s is in the save but did not spawn: %s", farp.name, tostring(err)), 30)
     end
   end
 end
