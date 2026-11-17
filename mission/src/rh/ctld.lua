@@ -42,7 +42,9 @@ function ctld.create()
   inst.enableFixedWing = true
   inst.dropcratesanywhere = true
   inst.nobuildinloadzones = true
-  inst.movecratesbeforebuild = true
+  -- Chinooks unload through the rearm/refuel window. Those crates were never "moved" by CTLD,
+  -- and the default refuses to build them until they are packed and dropped again.
+  inst.movecratesbeforebuild = false
   inst.forcehoverload = false
   inst.CrateDistance = 50
   inst.PackDistance = 50
