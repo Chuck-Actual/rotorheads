@@ -2878,25 +2878,38 @@ function csar.installHooks(inst)
     return false
   end
 
-  -- A hidden pilot has no group. Keep the record anyway, or the next status pass deletes him.
+  -- A hidden pilot has no group. Keep him on the books. Deleting the model must not count as killed.
   function inst:_CheckDownedPilotTable()
     local keep = {}
     for index, entry in pairs(self.downedPilots or {}) do
-      local group = entry.group
-      local onMap = group and group.IsAlive and group:IsAlive()
-      if onMap or (entry.alive and entry.rhHidden) then
+      if entry.alive then
+        if not csar.groupAlive(entry.group) then
+          entry.group = nil
+          entry.rhHidden = true
+        end
         keep[index] = entry
-      elseif entry.alive then
-        self:__KIA(1, entry.desc)
       end
     end
     self.downedPilots = keep
   end
 
+  -- A fresh alias every time. Spawning several pilots in one moment was reusing a name, so only one soldier appeared.
+  csar.spawnSerial = 0
+  function inst:_SpawnPilotInField(country, point, frequency, wetfeet)
+    csar.spawnSerial = csar.spawnSerial + 1
+    if point and point.IsSurfaceTypeWater and (point:IsSurfaceTypeWater() or wetfeet) then point.y = 0 end
+    local template = (self.usewetfeet and wetfeet) and self.wetfeettemplate or self.template
+    local alias = string.format("RH Pilot %d", csar.spawnSerial)
+    local group = SPAWN:NewWithAlias(template, alias):InitCoalition(self.coalition):InitCountry(country):InitDelayOff():SpawnFromCoordinate(point)
+    return group, alias
+  end
+
   local stockTrack = inst._CreateDownedPilotTrack
   function inst:_CreateDownedPilotTrack(...)
     stockTrack(self, ...)
-    csar.syncPilots(self)
+    for _, pilot in pairs(self.downedPilots or {}) do
+      if pilot.alive then csar.positionOf(pilot) end
+    end
   end
 
   -- Drop the pilot only inside the MASH zone. Landing at the airfield keeps him aboard.
@@ -2908,7 +2921,9 @@ function csar.installHooks(inst)
     end
     local onboard = self.inTransitGroups[heliname]
     if not onboard or not onboard[groupname] then return end
-    if not heli:InAir() and RH.logistics.mashAt(heli:GetVec2(), RH.config.mash.radius) then
+    -- InAir() without an argument treats a helicopter under 60 m as landed. That dropped the pilots
+    -- while still flying into the zone. DCS inAir() is false only when the wheels are on the ground.
+    if csar.onGround(heli) and RH.logistics.mashAt(heli:GetVec2(), RH.config.mash.radius) then
       self:_RescuePilots(heli)
       return
     end
@@ -3032,11 +3047,24 @@ function csar.boardSeconds(distance)
   return seconds
 end
 
+function csar.groupAlive(group)
+  if not group or not group.IsAlive then return false end
+  local ok, alive = pcall(function() return group:IsAlive() end)
+  return ok and alive == true
+end
+
+function csar.onGround(unit)
+  if not unit or not unit.GetDCSObject then return false end
+  local dcs = unit:GetDCSObject()
+  if not dcs or not dcs.inAir then return false end
+  return dcs:inAir() == false
+end
+
 function csar.positionOf(pilot)
   if not pilot then return nil end
-  if pilot.group and pilot.group.IsAlive and pilot.group:IsAlive() then
-    local v = pilot.group:GetVec2()
-    if v then pilot.rhPos = { x = v.x, y = v.y } end
+  if csar.groupAlive(pilot.group) then
+    local ok, v = pcall(function() return pilot.group:GetVec2() end)
+    if ok and v then pilot.rhPos = { x = v.x, y = v.y } end
   end
   return pilot.rhPos
 end
@@ -3051,7 +3079,7 @@ function csar.hidePilot(inst, pilot)
   if not pilot or pilot.rhHidden or csar.runFor(pilot.name) then return end
   local pos = csar.positionOf(pilot)
   if not pos then return end
-  if pilot.group and pilot.group.IsAlive and pilot.group:IsAlive() then
+  if csar.groupAlive(pilot.group) then
     pilot.group:Destroy(false)
   end
   pilot.group = nil
@@ -3060,14 +3088,20 @@ end
 
 function csar.showPilot(inst, pilot)
   if not pilot then return end
-  if pilot.group and pilot.group.IsAlive and pilot.group:IsAlive() then
+  if csar.groupAlive(pilot.group) then
     pilot.rhHidden = false
     return pilot.group
   end
   local pos = pilot.rhPos
   if not pos or not COORDINATE then return end
-  local group = inst:_SpawnPilotInField(inst.countryblue or country.id.USA, COORDINATE:NewFromVec2(pos), pilot.frequency or 0, pilot.wetfeet)
-  if not group then return end
+  pilot.group = nil
+  local ok, group = pcall(function()
+    return inst:_SpawnPilotInField(inst.countryblue or country.id.USA, COORDINATE:NewFromVec2(pos), pilot.frequency or 0, pilot.wetfeet)
+  end)
+  if not ok or not csar.groupAlive(group) then
+    pilot.rhHidden = true
+    return nil
+  end
   inst:_AddSpecialOptions(group)
   pilot.group = group
   pilot.name = group:GetName() or pilot.name
@@ -3098,6 +3132,10 @@ function csar.syncPilots(inst)
       local heli, dist = pos and csar.nearestDutyHeli(inst, pos)
       local reveal = RH.config.csar.revealRadius or 2000
       local hide = RH.config.csar.hideRadius or 2500
+      if not csar.groupAlive(pilot.group) then
+        pilot.group = nil
+        pilot.rhHidden = true
+      end
       if pilot.rhHidden then
         if dist and dist <= reveal then csar.showPilot(inst, pilot) end
       elseif not dist or dist > hide then
@@ -3123,7 +3161,13 @@ end
 
 function csar.watch(inst)
   if csar.instance ~= inst then return end
-  csar.syncPilots(inst)
+  local ok, err = pcall(csar.syncPilots, inst)
+  if not ok then RH.util.log("csar watch: %s", tostring(err)) end
+  csar.menuTick = (csar.menuTick or 0) + 1
+  if csar.menuTick % 2 == 0 then
+    local mok, merr = pcall(csar.refreshSignalMenus)
+    if not mok then RH.util.log("csar menu: %s", tostring(merr)) end
+  end
   inst:ScheduleOnce(2, csar.watch, inst)
 end
 
@@ -3272,19 +3316,18 @@ function csar.buildMenu(inst, group, unitName)
     if csar.requireDuty(unitName) then csar.disembark(group) end
   end)
   MENU_GROUP_COMMAND:New(group, "List active CSAR", root, function()
-    if csar.requireDuty(unitName) then inst:_DisplayActiveSAR(unitName) end
+    if csar.requireDuty(unitName) then csar.reportActive(unitName) end
   end)
   MENU_GROUP_COMMAND:New(group, "Check onboard", root, function()
     if csar.requireDuty(unitName) then inst:_CheckOnboard(unitName) end
   end)
   local smokeMenu = MENU_GROUP:New(group, "Request smoke", root)
   local flareMenu = MENU_GROUP:New(group, "Request flare", root)
-  MENU_GROUP_COMMAND:New(group, "Show pilots within 10 km", smokeMenu, function()
-    csar.fillSignalMenu(group, smokeMenu, unitName, "smoke")
-  end)
-  MENU_GROUP_COMMAND:New(group, "Show pilots within 10 km", flareMenu, function()
-    csar.fillSignalMenu(group, flareMenu, unitName, "flare")
-  end)
+  csar.signalMenus = csar.signalMenus or {}
+  table.insert(csar.signalMenus, { group = group, menu = smokeMenu, unitName = unitName, kind = "smoke" })
+  table.insert(csar.signalMenus, { group = group, menu = flareMenu, unitName = unitName, kind = "flare" })
+  csar.fillSignalMenu(group, smokeMenu, unitName, "smoke")
+  csar.fillSignalMenu(group, flareMenu, unitName, "flare")
 
   local mash = MENU_GROUP:New(group, "MASH", root)
   MENU_GROUP_COMMAND:New(group, "Check MASH status", mash, function()
@@ -3316,12 +3359,22 @@ function csar.pilotsNear(unitName, radius)
   return out
 end
 
+function csar.refreshSignalMenus()
+  for _, slot in ipairs(csar.signalMenus or {}) do
+    if slot.group and slot.group:IsAlive() then
+      csar.fillSignalMenu(slot.group, slot.menu, slot.unitName, slot.kind)
+    end
+  end
+end
+
 function csar.fillSignalMenu(group, menu, unitName, kind)
   if menu.RemoveSubMenus then menu:RemoveSubMenus() end
-  MENU_GROUP_COMMAND:New(group, "Show pilots within 10 km", menu, function()
-    csar.fillSignalMenu(group, menu, unitName, kind)
-  end)
-  if not csar.requireDuty(unitName) then return end
+  if not csar.unitOnDuty(unitName) then
+    MENU_GROUP_COMMAND:New(group, "Report on duty first", menu, function()
+      csar.setDuty(unitName, true)
+    end)
+    return
+  end
   local near = csar.pilotsNear(unitName, RH.config.csar.signalRadius or 10000)
   if #near == 0 then
     MENU_GROUP_COMMAND:New(group, "None within 10 km", menu, function() end)
@@ -3329,13 +3382,29 @@ function csar.fillSignalMenu(group, menu, unitName, kind)
   end
   for _, item in ipairs(near) do
     local who = item.pilot.desc or item.pilot.player or "Downed pilot"
-    if #who > 22 then who = string.sub(who, 1, 22) end
+    if #who > 18 then who = string.sub(who, 1, 18) end
     local label = string.format("%s %.1fkm", who, item.distance / 1000)
     local pilotIndex = item.pilot.index
     MENU_GROUP_COMMAND:New(group, label, menu, function()
       csar.signalPilot(unitName, pilotIndex, kind)
     end)
   end
+end
+
+function csar.reportActive(unitName)
+  local heli = UNIT and UNIT.FindByName and UNIT:FindByName(unitName)
+  local pilots = csar.list()
+  if not heli or #pilots == 0 then
+    RH.dcs.messageToUnit(unitName, "No active CSAR.", 10)
+    return
+  end
+  local pos = heli:GetVec2()
+  table.sort(pilots, function(a, b) return util.distance(pos, a.pos) < util.distance(pos, b.pos) end)
+  local lines = { "Active CSAR:" }
+  for _, p in ipairs(pilots) do
+    table.insert(lines, string.format("%s - %.1f km", p.description, util.distance(pos, p.pos) / 1000))
+  end
+  RH.dcs.messageToUnit(unitName, table.concat(lines, "\n"), 20)
 end
 
 function csar.signalPilot(unitName, pilotIndex, kind)
@@ -3394,18 +3463,20 @@ function csar.disembark(group)
     RH.dcs.messageToUnit(heliName, "No rescued pilots aboard.", 8)
     return
   end
-  if unit:InAir() then
+  if not csar.onGround(unit) then
     RH.dcs.messageToUnit(heliName, "Land before the pilots can get out.", 8)
     return
   end
   local heading = unit:GetHeading() or 0
-  local drop = unit:GetCoordinate():Translate(20, (heading + 180) % 360)
-  local n = 0
-  for _, rec in pairs(onboard) do
-    n = n + 1
-    local zone = ZONE_RADIUS:New("RH_DISEMBARK_" .. math.random(1, 1000000), drop:GetVec2(), 15, true)
+  local waiting = {}
+  for _, rec in pairs(onboard) do table.insert(waiting, rec) end
+  for i, rec in ipairs(waiting) do
+    -- Spread them out behind the tail. The same point was stacking every soldier into one model.
+    local drop = unit:GetCoordinate():Translate(18 + (i - 1) * 12, (heading + 180 + (i - 1) * 25) % 360)
+    local zone = ZONE_RADIUS:New("RH_DISEMBARK_" .. csar.spawnSerial + i, drop:GetVec2(), 8, true)
     inst:SpawnCSARAtZone(zone, coalition.side.BLUE, rec.desc or rec.player or "Downed pilot", false, true, rec.player or rec.desc, rec.originalUnit, true)
   end
+  local n = #waiting
   inst.inTransitGroups[heliName] = nil
   inst:_UpdateUnitCargoMass(heliName)
   csar.manifests[heliName] = nil
