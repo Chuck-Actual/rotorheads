@@ -300,8 +300,9 @@ RH.config = {
     displayCirclesFor = 60,
     -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
     airframes = 999,
-    -- Stocked at the pad: guns, the Apache 30mm, rockets, pylons, and pods. Not missiles, not fuel, not APKs.
-    supply = { shells = 5000, gunmounts = 99, nurs = 999, containers = 99, adapters = 99 },
+    -- On the shelf for every aircraft: guns, rounds, rockets, pylons, pods, and air-to-air missiles.
+    -- Air-to-ground missiles and fuel are not stocked. APKs stay out.
+    supply = { shells = 5000, gunmounts = 99, nurs = 999, containers = 99, adapters = 99, missiles = 99 },
     -- Pad faces north. Tent, depots, and the Humvee sit on the west side and face east.
     services = {
       { kind = "static", label = "Tent", typeName = "FARP Tent", shape = "PalatkaB", category = "Fortifications", dist = 70, bearing = 270, heading = 90 },
@@ -1517,19 +1518,38 @@ function logistics.captureStocks()
   end
 end
 
--- Guns, gun rounds, rockets, pylons, and pods are on the shelf. APKs are not.
+-- Hellfires, TOWs, Vikhrs, Mavericks, and the other air-to-ground missiles.
+function logistics.isAirToGroundMissile(item)
+  if type(item) ~= "string" then return false end
+  local name = string.upper(item)
+  local marks = {
+    "AGM", "AGR_20", "APK", "TOW", "HOT", "VIKHR", "ATAKA", "MALUTKA", "KONKURS",
+    "SPIKE", "SVIR", "REFLEX", "AT_6", "9M120", "9M220", "9M133", "HELLFIRE",
+    "X_25", "X_29", "X_31", "X_35", "X_41", "X_58", "X_59", "X_65", "X_22", "X_101", "X_555",
+    "RB75", "RB 04", "RB 05", "RB 15", "RB_04", "AKD", "C_701", "C_802", "CM-802", "CM_802",
+    "YJ-83", "YJ83", "KD_63", "KD_20", "ALARM", "KORMORAN", "SEA_EAGLE", "HJ-12", "HJ12",
+    "BGM_109", "9M723", "GB-6", "GB6", "LS_6", "BK90", "DWS39", "BRM-1", "ASM_N", "P_9M133",
+  }
+  for _, mark in ipairs(marks) do
+    if string.find(name, mark, 1, true) then return true end
+  end
+  return false
+end
+
+-- Guns, rounds, rockets, pylons, pods, and air-to-air missiles are on the shelf. APKs are not.
 function logistics.farpSupplyCount(category, item)
   if type(item) == "string" and string.find(string.upper(item), "APK", 1, true) then return nil end
+  if logistics.isAirToGroundMissile(item) then return nil end
   local supply = fcfg().supply or {}
   return supply[category]
 end
 
--- Missiles stay at whatever was hauled in. Guns and rockets are restocked instead of saved.
+-- Air-to-ground missiles stay at whatever was hauled in. Everything else is restocked.
 function logistics.keepHauledWeapon(item)
   if type(item) ~= "string" then return false end
   if string.find(string.upper(item), "APK", 1, true) then return false end
-  return string.find(item, "weapons.missiles.", 1, true) ~= nil
-    or string.find(item, "weapons.bombs.", 1, true) ~= nil
+  if logistics.isAirToGroundMissile(item) then return true end
+  return string.find(item, "weapons.bombs.", 1, true) ~= nil
     or string.find(item, "weapons.torpedoes.", 1, true) ~= nil
 end
 

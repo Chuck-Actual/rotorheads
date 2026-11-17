@@ -109,8 +109,9 @@ RH.config = {
     displayCirclesFor = 60,
     -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
     airframes = 999,
-    -- Stocked at the pad: guns, the Apache 30mm, rockets, pylons, and pods. Not missiles, not fuel, not APKs.
-    supply = { shells = 5000, gunmounts = 99, nurs = 999, containers = 99, adapters = 99 },
+    -- On the shelf for every aircraft: guns, rounds, rockets, pylons, pods, and air-to-air missiles.
+    -- Air-to-ground missiles and fuel are not stocked. APKs stay out.
+    supply = { shells = 5000, gunmounts = 99, nurs = 999, containers = 99, adapters = 99, missiles = 99 },
     -- Pad faces north. Tent, depots, and the Humvee sit on the west side and face east.
     services = {
       { kind = "static", label = "Tent", typeName = "FARP Tent", shape = "PalatkaB", category = "Fortifications", dist = 70, bearing = 270, heading = 90 },
