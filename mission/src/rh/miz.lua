@@ -522,4 +522,5 @@ function miz.exportFile(missionPath, worldPath, destPath)
   return true
 end
 
+if RH then RH.miz = miz end
 return miz

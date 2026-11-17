@@ -30,67 +30,24 @@ local function fmt(seconds)
   return string.format("%dh %02dm", math.floor(seconds / 3600), math.floor(seconds % 3600 / 60))
 end
 
-local function savedRoot()
+-- The mission script builds RH_Editor.miz. This hook only records the path, because
+-- DCS often does not give a multiplayer session a usable .miz until the mission is in.
+local function rememberMission()
+  local ok, name = pcall(DCS.getMissionFilename)
+  if not ok or type(name) ~= "string" or name == "" then return end
   local base = lfs.writedir()
   if not base:match("[/\\]$") then base = base .. "\\" end
-  return base
-end
-
-local function editorPaths()
-  local mission = DCS.getMissionFilename()
-  if type(mission) ~= "string" or mission == "" then return nil end
-  local root = savedRoot()
-  -- Always this folder, which is the one the Mission Editor opens by default.
-  local dest = root .. "Missions\\RH_Editor.miz"
-  local world = root .. "rotorheads\\world.lua"
-  return mission, world, dest
-end
-
-local function exportEditor(reason)
-  local mission, world, dest = editorPaths()
-  if not mission then
-    log("editor export skipped (" .. reason .. "): mission path unavailable")
+  lfs.mkdir(base .. "rotorheads")
+  local f = io.open(base .. "rotorheads\\active_mission.txt", "w")
+  if not f then
+    log("could not record mission path")
     return
   end
-  log("editor export reading " .. mission)
-  if not lfs.attributes(world) then
-    log("editor export skipped (" .. reason .. "): no world.lua yet")
-    return
-  end
-  local attr = lfs.attributes(mission)
-  if reason ~= "exit" and attr and attr.size and attr.size > 8 * 1024 * 1024 then
-    if not RHHook.editorDeferred then
-      RHHook.editorDeferred = true
-      log("editor export deferred until exit (" .. math.floor(attr.size / 1024) .. " KB mission)")
-    end
-    return
-  end
-  local hooks = lfs.writedir() .. "Scripts/Hooks/"
-  local okInflate, inflateOrErr = pcall(dofile, hooks .. "inflate.lua")
-  if not okInflate then
-    log("editor export skipped: " .. tostring(inflateOrErr))
-    return
-  end
-  _G.RH_INFLATE = inflateOrErr
-  local chunk, loadErr = loadfile(hooks .. "rh_miz.lua")
-  if not chunk then
-    log("editor export skipped: " .. tostring(loadErr))
-    return
-  end
-  if setfenv then
-    setfenv(chunk, setmetatable({ RH_INFLATE = inflateOrErr }, { __index = _G }))
-  end
-  local okMiz, mizOrErr = pcall(chunk)
-  if not okMiz then
-    log("editor export skipped: " .. tostring(mizOrErr))
-    return
-  end
-  local started = DCS.getRealTime()
-  local ok, err = mizOrErr.exportFile(mission, world, dest)
-  if ok then
-    log(string.format("wrote %s (%s, %.1fs)", dest, reason, DCS.getRealTime() - started))
-  else
-    log("editor export failed (" .. reason .. "): " .. tostring(err))
+  f:write(name)
+  f:close()
+  if name ~= RHHook.missionPath then
+    RHHook.missionPath = name
+    log("mission file: " .. name)
   end
 end
 
@@ -105,8 +62,7 @@ function RHHook.onSimulationStop()
     RHHook.shutdownSent = true
     toMission("RH.shutdown()")
   end
-  local ok, err = pcall(exportEditor, "exit")
-  if not ok then log("editor export error: " .. tostring(err)) end
+  pcall(rememberMission)
 end
 
 function RHHook.onSimulationStart()
@@ -119,10 +75,10 @@ function RHHook.onSimulationFrame()
   local now = DCS.getRealTime()
   if now - RHHook.lastCheck < 5 then return end
   RHHook.lastCheck = now
-  if now - RHHook.lastEditorExport >= 30 then
+  if now - (RHHook.lastEditorExport or 0) >= 30 then
     RHHook.lastEditorExport = now
-    local ok, err = pcall(exportEditor, "autosave")
-    if not ok then log("editor export error: " .. tostring(err)) end
+    local ok, err = pcall(rememberMission)
+    if not ok then log("mission path error: " .. tostring(err)) end
   end
   if not DCS.isServer() or not DCS.isMultiplayer() then return end
 

@@ -839,4 +839,5 @@ function M.inflate_zlib(t)
  end
 end
 
+RH_INFLATE = M
 return M

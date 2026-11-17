@@ -150,11 +150,12 @@ live in the simulation until they are written out. Every 30 seconds, and again w
 records ground units, ships, statics, and FARP warehouses into `world.lua`. The next launch puts back anything
 that is missing, and removes an editor-placed ground unit that was destroyed.
 
-Leaving the mission also writes `Saved Games\DCS\Missions\RH_Editor.miz`. Open **that**
-file in the Mission Editor when you want to move or delete something by hand. The mission you have been
-flying is not overwritten. After you edit `RH_Editor.miz`, launch that file if you want the hand edit to be
-the one the campaign continues from. A new unit you place in it is kept. Cargo that is inside a helicopter
-at the moment of the save is not part of this snapshot.
+While the mission is running, the campaign script writes `Saved Games\DCS\Missions\RH_Editor.miz`
+from `RH Test.miz` plus the units on the field. It does not wait for you to stop the server. The result of
+the last attempt is `Saved Games\DCS\Missions\Rotorheads\last_export.txt`. Open `RH_Editor.miz` in the
+Mission Editor when you want to move or delete something by hand. The mission you launched is left
+unchanged. DCS also has its own checkpoint: as host, press Esc and choose Save Mission. That file includes
+the spawned units and this campaign, and it can be opened in the editor the same way.
 
 Re-run `tools\windows\install.ps1` after this update so the hook that writes `RH_Editor.miz` is installed.
 DCS has to be restarted before a new hook loads.

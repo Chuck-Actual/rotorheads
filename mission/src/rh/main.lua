@@ -46,6 +46,8 @@ function RH.start()
     RH.dcs.message("all", "ROTORHEADS WARNING: MissionScripting.lua is not desanitized, so the campaign will NOT be saved. See README step 1.", 60)
   end
   RH.persistence.load()
+  if RH.world and RH.world.readOfficialSave then RH.world.readOfficialSave() end
+  if RH.world and RH.world.installOfficialSave then RH.world.installOfficialSave() end
   if RH.world and RH.world.restore then RH.world.restore() end
   RH.events.install()
 

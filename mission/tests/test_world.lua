@@ -41,6 +41,15 @@ T.test("a moved Humvee is respawned at the saved point", function()
   T.eq(#plan.spawn, 0)
 end)
 
+T.test("editor mission is RH Test.miz unless the hook saw another file", function()
+  T.fresh()
+  local files = { ["C:\\DCS\\Missions\\RH Test.miz"] = true }
+  T.eq(RH.world.pickSource("C:\\DCS\\", nil, function(p) return files[p] end), "C:\\DCS\\Missions\\RH Test.miz")
+  files["D:\\Other.miz"] = true
+  T.eq(RH.world.pickSource("C:\\DCS\\", "  D:\\Other.miz\r\n", function(p) return files[p] end), "D:\\Other.miz")
+  T.eq(RH.world.pickSource("C:\\DCS\\", "C:\\DCS\\Missions\\RH_Editor.miz", function(p) return files[p] end), "C:\\DCS\\Missions\\RH Test.miz")
+end)
+
 T.test("world capture records a runtime Humvee and keeps the editor baseline", function()
   local w = T.fresh()
   local roster = {

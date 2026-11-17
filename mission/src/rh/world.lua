@@ -110,6 +110,95 @@ function world.capture()
   RH.state.world = state
   local path = RH.dcs.savePath and RH.dcs.savePath("world.lua")
   if path and RH.dcs.writeFile then RH.dcs.writeFile(path, util.serialize(state)) end
+  local ok, err = pcall(world.exportEditor)
+  if not ok then util.log("editor export error: %s", tostring(err)) end
+  return true
+end
+
+function world.savedRoot()
+  if not RH.dcs.filesEnabled or not RH.dcs.filesEnabled() then return nil end
+  if not lfs or not lfs.writedir then return nil end
+  local base = lfs.writedir()
+  if type(base) ~= "string" or base == "" then return nil end
+  if not base:match("[/\\]$") then base = base .. "\\" end
+  return base
+end
+
+function world.fileExists(path)
+  if type(path) ~= "string" or path == "" or not io then return false end
+  local f = io.open(path, "rb")
+  if not f then return false end
+  f:close()
+  return true
+end
+
+-- Prefer the mission the hook saw, then the configured test mission. Never read the editor copy back in.
+function world.pickSource(root, hint, exists)
+  exists = exists or world.fileExists
+  local function accept(path)
+    if type(path) ~= "string" then return nil end
+    path = path:gsub("^%s+", ""):gsub("%s+$", "")
+    if path == "" or path:lower():match("rh_editor%.miz$") then return nil end
+    if exists(path) then return path end
+    return nil
+  end
+  local chosen = accept(hint)
+  if chosen then return chosen end
+  return accept(root .. (RH.config.editorSource or "Missions\\RH Test.miz"))
+end
+
+function world.writeNote(text)
+  local root = world.savedRoot()
+  if not root or not RH.dcs.writeFile then return end
+  RH.dcs.writeFile(root .. "Missions\\Rotorheads\\last_export.txt", text .. "\r\n")
+  util.log("editor: %s", (text:gsub("\r\n", " | ")))
+end
+
+-- Builds Saved Games\DCS\Missions\RH_Editor.miz from the running mission plus the snapshot.
+-- This runs in the mission script, which can already write files. The server hook cannot see the miz.
+function world.exportEditor()
+  local root = world.savedRoot()
+  if not root then return end
+  if not RH.miz or not RH.miz.exportFile then
+    world.writeNote("Editor mission was not built: the mission packer is not loaded.")
+    return
+  end
+  local hint = RH.dcs.readFile and RH.dcs.readFile(root .. "rotorheads\\active_mission.txt") or nil
+  local src = world.pickSource(root, hint)
+  local dest = root .. "Missions\\RH_Editor.miz"
+  if not src then
+    world.writeNote("Editor mission was not built. Put the mission at Saved Games\\DCS\\Missions\\RH Test.miz, or launch it so the hook can record the path.")
+    return
+  end
+  local ok, err = RH.miz.exportFile(src, root .. "rotorheads\\world.lua", dest)
+  if ok then
+    world.writeNote("Wrote " .. dest .. "\r\nFrom " .. src .. "\r\nOpen RH_Editor.miz in the Mission Editor. It updates about every 30 seconds while the mission is running.")
+  else
+    world.writeNote("Editor mission failed.\r\n" .. tostring(err) .. "\r\nSource " .. src)
+  end
+end
+
+-- DCS's own Esc > Save Mission includes script-spawned units. Attach the campaign so that file can resume the war.
+function world.installOfficialSave()
+  local dcsWorld = _G.world
+  if type(dcsWorld) ~= "table" or type(dcsWorld.setPersistenceHandler) ~= "function" then
+    util.log("DCS Save Mission persistence is not in this build")
+    return
+  end
+  dcsWorld.setPersistenceHandler("Rotorheads", function()
+    return { campaign = RH.state }
+  end)
+  util.log("campaign will be stored inside a DCS Save Mission file")
+end
+
+function world.readOfficialSave()
+  if RH.state.world and RH.state.world.baselineReady then return false end
+  local dcsWorld = _G.world
+  if type(dcsWorld) ~= "table" or type(dcsWorld.getPersistenceData) ~= "function" then return false end
+  local ok, data = pcall(dcsWorld.getPersistenceData, "Rotorheads")
+  if not ok or type(data) ~= "table" or type(data.campaign) ~= "table" then return false end
+  for k, v in pairs(data.campaign) do RH.state[k] = v end
+  util.log("loaded the campaign stored in this mission's DCS save")
   return true
 end
 
