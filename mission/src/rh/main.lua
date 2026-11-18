@@ -45,27 +45,35 @@ function RH.start()
     util.log("io/lfs/os are sanitized: running WITHOUT saving. Edit Scripts\\MissionScripting.lua (see README).")
     RH.dcs.message("all", "ROTORHEADS WARNING: MissionScripting.lua is not desanitized, so the campaign will NOT be saved. See README step 1.", 60)
   end
-  RH.persistence.load()
+  local function step(name, fn)
+    local ok, err = pcall(fn)
+    if not ok then
+      util.log("start step %s failed: %s", name, tostring(err))
+      RH.dcs.message("all", "Rotorheads " .. name .. " failed: " .. tostring(err), 30)
+    end
+    return ok
+  end
+
+  step("load", RH.persistence.load)
   -- The disk save in Saved Games\DCS\rotorheads is the only resume path. A DCS Save Mission
   -- also stores a copy inside the miz, and loading that copy put editor-deleted units back.
-  if RH.world and RH.world.installOfficialSave then RH.world.installOfficialSave() end
-  if RH.world and RH.world.restore then RH.world.restore() end
-  RH.events.install()
+  if RH.world and RH.world.installOfficialSave then step("save hook", RH.world.installOfficialSave) end
+  if RH.world and RH.world.restore then step("restore", RH.world.restore) end
+  step("events", RH.events.install)
 
-  RH.logistics.start()
-  RH.outposts.start()
-  RH.factories.start()
-  RH.redair.start()
-  RH.paratroopers.spawn()
-  RH.lives.start()
-  RH.markers.start()
-  RH.convoy.start()
-  RH.ctld.create()
-  RH.csar.start()
-  RH.livemap.start()
-  RH.persistence.start()
-
-  RH.persistence.save()
+  step("logistics", RH.logistics.start)
+  step("outposts", RH.outposts.start)
+  step("factories", RH.factories.start)
+  step("red air", RH.redair.start)
+  step("paratroopers", RH.paratroopers.spawn)
+  step("lives", RH.lives.start)
+  step("markers", RH.markers.start)
+  step("convoy", RH.convoy.start)
+  step("ctld", RH.ctld.create)
+  step("csar", RH.csar.start)
+  step("live map", RH.livemap.start)
+  step("autosave", RH.persistence.start)
+  step("save", RH.persistence.save)
   RH.dcs.message("all", RH.config.campaignName .. " is live. F10 > CSAR > Report on duty to hear downed pilots. Chat: -lives, -farps, -mash", 30)
 end
 

@@ -855,8 +855,11 @@ function dcs.respawnStatic(info)
 end
 
 function dcs.destroyStatic(name)
-  local s = StaticObject.getByName(name)
-  if s and s:isExist() then s:destroy() end
+  dcs.forgetMooseObject(name)
+  pcall(function()
+    local s = StaticObject.getByName(name)
+    if s and s:isExist() then s:destroy() end
+  end)
 end
 
 -- Units and groups ---------------------------------------------------------------
@@ -1306,11 +1309,25 @@ function dcs.groundRoster()
   return out
 end
 
+function dcs.forgetMooseObject(name)
+  if type(name) ~= "string" or name == "" or not _DATABASE then return end
+  if _DATABASE.GROUPS then _DATABASE.GROUPS[name] = nil end
+  if _DATABASE.UNITS then _DATABASE.UNITS[name] = nil end
+  if _DATABASE.STATICS then _DATABASE.STATICS[name] = nil end
+end
+
 function dcs.destroyNamed(name)
-  local okG, g = pcall(Group.getByName, name)
-  if okG and g and g:isExist() then g:destroy() return end
-  local okS, s = pcall(StaticObject.getByName, name)
-  if okS and s and s:isExist() then s:destroy() end
+  -- Drop the MOOSE wrapper first. A destroyed group left in the database makes the next
+  -- menu scan call getCoalition() and DCS throws "Group doesn't exist", which aborts startup.
+  dcs.forgetMooseObject(name)
+  pcall(function()
+    local g = Group.getByName(name)
+    if g and g:isExist() then g:destroy() end
+  end)
+  pcall(function()
+    local s = StaticObject.getByName(name)
+    if s and s:isExist() then s:destroy() end
+  end)
 end
 
 function dcs.spawnSnapshot(obj)
@@ -1426,6 +1443,9 @@ function dcs.spawnFarpPad(name, point, freq)
     units = { unit },
   }
   local ok, err = pcall(coalition.addGroup, country.id.USA, -1, groupData)
+  -- A FARP pad is a static group. MOOSE still files it with the vehicle groups, and the F10
+  -- scan then calls getCoalition() on it. DCS answers "Group doesn't exist" and startup stops.
+  dcs.forgetMooseObject(name)
   if not ok then util.log("FARP pad %s failed: %s", name, tostring(err)) end
   return ok
 end
@@ -3734,10 +3754,8 @@ function ctld.ensureKitTemplate(name)
   copy.GroupName = name
   copy.Template.name = name
   groups[name] = copy
-  -- SPAWN refuses the copy unless a group of that name is also in the live database.
-  if _DATABASE.GROUPS and not _DATABASE.GROUPS[name] and GROUP and GROUP.Register then
-    _DATABASE.GROUPS[name] = GROUP:Register(name)
-  end
+  -- Do not GROUP:Register a name that is not actually in the mission. The F10 scan calls
+  -- getCoalition() on every database group, and DCS throws "Group doesn't exist" for a fake one.
   util.log("crate template %s copied from %s", name, donorName)
   return true
 end
@@ -4126,6 +4144,7 @@ end
 
 function ctld.linkExisting()
   if not coalition or not coalition.getGroups or not GROUP then return end
+  local ok, err = pcall(function()
   local names = {}
   for _, group in ipairs(coalition.getGroups(coalition.side.BLUE, Group.Category.GROUND) or {}) do
     local name = group:getName()
@@ -4140,6 +4159,8 @@ function ctld.linkExisting()
     local wrapper = GROUP:FindByName(name)
     if wrapper and wrapper:IsAlive() then ctld.linkSam(wrapper) end
   end
+  end)
+  if not ok then util.log("SAM link failed: %s", tostring(err)) end
 end
 
 function ctld.onPlayerEnter(e)
@@ -4953,27 +4974,35 @@ function RH.start()
     util.log("io/lfs/os are sanitized: running WITHOUT saving. Edit Scripts\\MissionScripting.lua (see README).")
     RH.dcs.message("all", "ROTORHEADS WARNING: MissionScripting.lua is not desanitized, so the campaign will NOT be saved. See README step 1.", 60)
   end
-  RH.persistence.load()
+  local function step(name, fn)
+    local ok, err = pcall(fn)
+    if not ok then
+      util.log("start step %s failed: %s", name, tostring(err))
+      RH.dcs.message("all", "Rotorheads " .. name .. " failed: " .. tostring(err), 30)
+    end
+    return ok
+  end
+
+  step("load", RH.persistence.load)
   -- The disk save in Saved Games\DCS\rotorheads is the only resume path. A DCS Save Mission
   -- also stores a copy inside the miz, and loading that copy put editor-deleted units back.
-  if RH.world and RH.world.installOfficialSave then RH.world.installOfficialSave() end
-  if RH.world and RH.world.restore then RH.world.restore() end
-  RH.events.install()
+  if RH.world and RH.world.installOfficialSave then step("save hook", RH.world.installOfficialSave) end
+  if RH.world and RH.world.restore then step("restore", RH.world.restore) end
+  step("events", RH.events.install)
 
-  RH.logistics.start()
-  RH.outposts.start()
-  RH.factories.start()
-  RH.redair.start()
-  RH.paratroopers.spawn()
-  RH.lives.start()
-  RH.markers.start()
-  RH.convoy.start()
-  RH.ctld.create()
-  RH.csar.start()
-  RH.livemap.start()
-  RH.persistence.start()
-
-  RH.persistence.save()
+  step("logistics", RH.logistics.start)
+  step("outposts", RH.outposts.start)
+  step("factories", RH.factories.start)
+  step("red air", RH.redair.start)
+  step("paratroopers", RH.paratroopers.spawn)
+  step("lives", RH.lives.start)
+  step("markers", RH.markers.start)
+  step("convoy", RH.convoy.start)
+  step("ctld", RH.ctld.create)
+  step("csar", RH.csar.start)
+  step("live map", RH.livemap.start)
+  step("autosave", RH.persistence.start)
+  step("save", RH.persistence.save)
   RH.dcs.message("all", RH.config.campaignName .. " is live. F10 > CSAR > Report on duty to hear downed pilots. Chat: -lives, -farps, -mash", 30)
 end
 

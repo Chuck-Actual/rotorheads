@@ -241,8 +241,11 @@ function dcs.respawnStatic(info)
 end
 
 function dcs.destroyStatic(name)
-  local s = StaticObject.getByName(name)
-  if s and s:isExist() then s:destroy() end
+  dcs.forgetMooseObject(name)
+  pcall(function()
+    local s = StaticObject.getByName(name)
+    if s and s:isExist() then s:destroy() end
+  end)
 end
 
 -- Units and groups ---------------------------------------------------------------
@@ -692,11 +695,25 @@ function dcs.groundRoster()
   return out
 end
 
+function dcs.forgetMooseObject(name)
+  if type(name) ~= "string" or name == "" or not _DATABASE then return end
+  if _DATABASE.GROUPS then _DATABASE.GROUPS[name] = nil end
+  if _DATABASE.UNITS then _DATABASE.UNITS[name] = nil end
+  if _DATABASE.STATICS then _DATABASE.STATICS[name] = nil end
+end
+
 function dcs.destroyNamed(name)
-  local okG, g = pcall(Group.getByName, name)
-  if okG and g and g:isExist() then g:destroy() return end
-  local okS, s = pcall(StaticObject.getByName, name)
-  if okS and s and s:isExist() then s:destroy() end
+  -- Drop the MOOSE wrapper first. A destroyed group left in the database makes the next
+  -- menu scan call getCoalition() and DCS throws "Group doesn't exist", which aborts startup.
+  dcs.forgetMooseObject(name)
+  pcall(function()
+    local g = Group.getByName(name)
+    if g and g:isExist() then g:destroy() end
+  end)
+  pcall(function()
+    local s = StaticObject.getByName(name)
+    if s and s:isExist() then s:destroy() end
+  end)
 end
 
 function dcs.spawnSnapshot(obj)
@@ -812,6 +829,9 @@ function dcs.spawnFarpPad(name, point, freq)
     units = { unit },
   }
   local ok, err = pcall(coalition.addGroup, country.id.USA, -1, groupData)
+  -- A FARP pad is a static group. MOOSE still files it with the vehicle groups, and the F10
+  -- scan then calls getCoalition() on it. DCS answers "Group doesn't exist" and startup stops.
+  dcs.forgetMooseObject(name)
   if not ok then util.log("FARP pad %s failed: %s", name, tostring(err)) end
   return ok
 end

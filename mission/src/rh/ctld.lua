@@ -58,10 +58,8 @@ function ctld.ensureKitTemplate(name)
   copy.GroupName = name
   copy.Template.name = name
   groups[name] = copy
-  -- SPAWN refuses the copy unless a group of that name is also in the live database.
-  if _DATABASE.GROUPS and not _DATABASE.GROUPS[name] and GROUP and GROUP.Register then
-    _DATABASE.GROUPS[name] = GROUP:Register(name)
-  end
+  -- Do not GROUP:Register a name that is not actually in the mission. The F10 scan calls
+  -- getCoalition() on every database group, and DCS throws "Group doesn't exist" for a fake one.
   util.log("crate template %s copied from %s", name, donorName)
   return true
 end
@@ -450,6 +448,7 @@ end
 
 function ctld.linkExisting()
   if not coalition or not coalition.getGroups or not GROUP then return end
+  local ok, err = pcall(function()
   local names = {}
   for _, group in ipairs(coalition.getGroups(coalition.side.BLUE, Group.Category.GROUND) or {}) do
     local name = group:getName()
@@ -464,6 +463,8 @@ function ctld.linkExisting()
     local wrapper = GROUP:FindByName(name)
     if wrapper and wrapper:IsAlive() then ctld.linkSam(wrapper) end
   end
+  end)
+  if not ok then util.log("SAM link failed: %s", tostring(err)) end
 end
 
 function ctld.onPlayerEnter(e)
