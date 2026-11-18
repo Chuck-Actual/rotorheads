@@ -1,0 +1,30 @@
+---
+description: How this DCS server is hosted, where files live, and how saves work
+alwaysApply: true
+---
+
+# Rotorheads DCS host
+
+The owner hosts a LAN multiplayer server from the DCS client on the same PC. The dedicated server is not in use yet. One DCS install cannot host and edit at the same time. Stop the mission before opening the Mission Editor.
+
+## Paths
+
+- Game install: `D:\Games\DCS World`. Dedicated server install, for later: `D:\Games\DCS World Server`.
+- Saved Games: `C:\Users\Hill\Saved Games\DCS`.
+- `Missions\Rotorheads` holds the scripts (`rotorheads.lua`, `Moose_.lua`, `rh_loader.lua`). Do not delete it. Replacing `rotorheads.lua` does nothing until DCS is fully quit and the mission is launched again.
+- `Saved Games\DCS\rotorheads` is the campaign save (`campaign.lua`, `world.lua`). Deleting this folder resets the war to the units in the hosted mission. Deleting only `world.lua` does not reset it, because the unit list is also inside `campaign.lua`.
+- Host `Missions\RH Manual.miz` unless the owner names a newer file. Do not send them back to `RH Test.miz`.
+
+## Saves
+
+- The disk folder is the only resume path. Do not respawn units from `persistence/Rotorheads.json` inside a `.miz`. That hidden copy is written by Esc, Save Mission, and it puts editor-deleted vehicles back.
+- Esc, Save Mission must use a new filename. Saving over the open mission leaves a stuck `.writing` file and does not update the mission being hosted.
+- Stopping the server does not rewrite the `.miz`. The Lua folder updates about every 30 seconds while the mission is running.
+- After an editor change, host the mission file that was just saved. For a deleted vehicle to stay gone, delete `Saved Games\DCS\rotorheads` before that launch.
+- `D:\Games\DCS World\Scripts\MissionScripting.lua` must keep `sanitizeModule('os')`, `sanitizeModule('io')`, and `sanitizeModule('lfs')` commented out. A DCS update puts those lines back. The server copy of that file is separate.
+
+## Scripting
+
+- A hook `net.dostring_in('mission', 'return ...')` does not see mission globals. Call mission code with `a_do_script`.
+- The hook can write files. The mission script can write files only when MissionScripting.lua is desanitized.
+- Do not build the editor mission by rewriting the `.miz` that is currently open.
