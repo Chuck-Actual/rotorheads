@@ -496,6 +496,15 @@ function dcs.toLatLon(point)
   return lat, lon
 end
 
+function dcs.mgrsGrid(point)
+  if not coord or not coord.LOtoLL or not coord.LLtoMGRS or not point then return nil end
+  local ok, lat, lon = pcall(coord.LOtoLL, vec3(point, 0))
+  if not ok or not lat then return nil end
+  local converted, mgrs = pcall(coord.LLtoMGRS, lat, lon)
+  if not converted then return nil end
+  return util.mgrsSquare(mgrs)
+end
+
 function dcs.marks()
   local out = {}
   for _, m in ipairs(world.getMarkPanels() or {}) do
@@ -530,20 +539,22 @@ function dcs.removeDrawing(id)
   dcs.drawIds[id] = nil
 end
 
-function dcs.drawLabel(id, side, point, text, fontSize, _markId)
+function dcs.drawLabel(id, side, point, text, fontSize, _markId, color)
   -- DCS will not show a mark id again after removeMark. Update the existing mark,
   -- and only create one with a fresh id.
+  local ink = color or { 1, 1, 1, 1 }
   local ids = dcs.drawIds[id]
   local spot = vec3(util.toVec2(point))
   if ids and ids[1] and trigger.action.setMarkupText then
     trigger.action.setMarkupText(ids[1], text)
+    if color and trigger.action.setMarkupColor then trigger.action.setMarkupColor(ids[1], ink) end
     if trigger.action.setMarkupPositionStart then trigger.action.setMarkupPositionStart(ids[1], spot) end
     return ids[1]
   end
   local textId = dcs.nextDrawId
   dcs.nextDrawId = dcs.nextDrawId + 1
   local sideId = SIDE_IDS[side] or -1
-  trigger.action.textToAll(sideId, textId, spot, { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
+  trigger.action.textToAll(sideId, textId, spot, ink, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
   dcs.drawIds[id] = { textId }
   return textId
 end

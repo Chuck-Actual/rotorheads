@@ -393,7 +393,6 @@ function ctld.attachReturnCommand(inst, group, unit)
     if not group.RHReturnParents[parent] then
       local commands = {
         { "Show logistics zones", function() ctld.showLoadZones(group) end },
-        { "Pack MASH", function() ctld.packMashNearby(inst, group, ctld.liveUnit(group, unit), true) end },
         { "Return crates to tent", function() ctld.returnCratesToTent(inst, group, unit) end },
       }
       for _, command in ipairs(commands) do
@@ -572,7 +571,8 @@ function ctld.packMashNearby(inst, group, unit, announceMiss)
   end
   local mash = RH.logistics.packMash(name)
   local patients = mash and mash.patients or 0
-  local text = string.format("%s packed. %d MASH crates are on the ground. Load them with CTLD, or with the Chinook rearm and refuel cargo menu.", name, count)
+  local label = mash and RH.logistics.mashCallsign(mash) or "MASH"
+  local text = string.format("%s packed. %d MASH crates are on the ground. Load them with CTLD, or with the Chinook rearm and refuel cargo menu.", label, count)
   if patients > 0 then
     text = text .. string.format(" The %d patients there are no longer at a hospital.", patients)
   end

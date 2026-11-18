@@ -27,6 +27,25 @@ function util.toVec2(p)
   return { x = p.x, y = p.y }
 end
 
+-- YE72 is the 100 km square plus the first easting digit and the first northing digit.
+function util.mgrsSquare(mgrs)
+  if type(mgrs) ~= "table" or type(mgrs.MGRSDigraph) ~= "string" or mgrs.MGRSDigraph == "" then return nil end
+  local function digit(value)
+    if type(value) == "number" then
+      local meters = math.floor(value)
+      if meters < 0 then meters = 0 end
+      if meters >= 100000 then meters = meters % 100000 end
+      return string.sub(string.format("%05d", meters), 1, 1)
+    end
+    local text = tostring(value or "")
+    if text == "" then return nil end
+    return string.sub(text, 1, 1)
+  end
+  local east, north = digit(mgrs.Easting), digit(mgrs.Northing)
+  if not east or not north then return nil end
+  return mgrs.MGRSDigraph .. east .. north
+end
+
 function util.distance(a, b)
   local p, q = util.toVec2(a), util.toVec2(b)
   local dx, dy = p.x - q.x, p.y - q.y
@@ -340,10 +359,10 @@ RH.config = {
     crateMass = 400,
     -- A MASH builds only inside this distance of a FARP or Logistics Center.
     nearSite = 1000,
-    -- CTLD Pack, and Pack MASH, reach a hospital tent inside this distance of the helicopter.
+    -- CTLD Pack crates reaches a hospital tent inside this distance of the helicopter.
     packRadius = 100,
-    -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
-    capacity = 9999,
+    -- Pilots a hospital tent can hold. A full MASH stops taking rescues until a transport task frees slots.
+    capacity = 30,
     -- Drop off rescued pilots within this distance of the hospital tent.
     radius = 150,
   },
@@ -1120,6 +1139,15 @@ function dcs.toLatLon(point)
   return lat, lon
 end
 
+function dcs.mgrsGrid(point)
+  if not coord or not coord.LOtoLL or not coord.LLtoMGRS or not point then return nil end
+  local ok, lat, lon = pcall(coord.LOtoLL, vec3(point, 0))
+  if not ok or not lat then return nil end
+  local converted, mgrs = pcall(coord.LLtoMGRS, lat, lon)
+  if not converted then return nil end
+  return util.mgrsSquare(mgrs)
+end
+
 function dcs.marks()
   local out = {}
   for _, m in ipairs(world.getMarkPanels() or {}) do
@@ -1154,20 +1182,22 @@ function dcs.removeDrawing(id)
   dcs.drawIds[id] = nil
 end
 
-function dcs.drawLabel(id, side, point, text, fontSize, _markId)
+function dcs.drawLabel(id, side, point, text, fontSize, _markId, color)
   -- DCS will not show a mark id again after removeMark. Update the existing mark,
   -- and only create one with a fresh id.
+  local ink = color or { 1, 1, 1, 1 }
   local ids = dcs.drawIds[id]
   local spot = vec3(util.toVec2(point))
   if ids and ids[1] and trigger.action.setMarkupText then
     trigger.action.setMarkupText(ids[1], text)
+    if color and trigger.action.setMarkupColor then trigger.action.setMarkupColor(ids[1], ink) end
     if trigger.action.setMarkupPositionStart then trigger.action.setMarkupPositionStart(ids[1], spot) end
     return ids[1]
   end
   local textId = dcs.nextDrawId
   dcs.nextDrawId = dcs.nextDrawId + 1
   local sideId = SIDE_IDS[side] or -1
-  trigger.action.textToAll(sideId, textId, spot, { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
+  trigger.action.textToAll(sideId, textId, spot, ink, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
   dcs.drawIds[id] = { textId }
   return textId
 end
@@ -2617,9 +2647,10 @@ function logistics.buildMash(point, builtBy)
   local ok, reason = logistics.validateMashSite(point)
   if not ok then return nil, reason end
   local name = string.format("MASH %02d", util.count(RH.state.mashes) + 1)
-  logistics.registerMash(name, point, true)
+  local mash = logistics.registerMash(name, point, true)
   RH.dcs.spawnMash(name, point)
-  RH.dcs.message("blue", string.format("%s built %s.", builtBy or "A pilot", name), 15)
+  logistics.refreshMashLabels()
+  RH.dcs.message("blue", string.format("%s built %s.", builtBy or "A pilot", logistics.mashCallsign(mash)), 15)
   return name
 end
 
@@ -2661,7 +2692,30 @@ function logistics.packMash(name)
   elseif RH.dcs.destroyStatic then
     RH.dcs.destroyStatic(tentName)
   end
+  if RH.dcs.removeDrawing then RH.dcs.removeDrawing("mash-" .. name) end
   return mash
+end
+
+function logistics.mashCallsign(mash)
+  if not mash then return "MASH" end
+  local grid = mash.grid
+  if not grid and RH.dcs.mgrsGrid then grid = RH.dcs.mgrsGrid(mash) end
+  if type(grid) == "string" and grid ~= "" then return "MASH " .. grid end
+  return "MASH"
+end
+
+function logistics.mashLabelPoint(mash)
+  return util.offset(mash, math.pi / 2, 12)
+end
+
+function logistics.refreshMashLabels()
+  if not RH.dcs.drawLabel then return end
+  for name, mash in pairs(RH.state.mashes or {}) do
+    if mash.player and mash.x then
+      local ok, err = pcall(RH.dcs.drawLabel, "mash-" .. name, "blue", logistics.mashLabelPoint(mash), "MASH", 16, nil, { 0.25, 0.62, 1, 1 })
+      if not ok then util.log("MASH label %s failed: %s", tostring(name), tostring(err)) end
+    end
+  end
 end
 
 -- Editor zones and the save from the old MASH tent are not hospitals. Only a player build is.
@@ -2692,6 +2746,7 @@ function logistics.spawnPlayerMashes()
   for name, mash in pairs(RH.state.mashes) do
     RH.dcs.spawnMash(name, mash)
   end
+  logistics.refreshMashLabels()
 end
 
 function logistics.mashAt(point, radius)
@@ -2711,22 +2766,31 @@ end
 
 function logistics.mashFull(mashName)
   local m = RH.state.mashes[mashName]
-  if not m or mcfg().capacity >= 9999 then return false end
+  if not m then return false end
   return m.patients >= mcfg().capacity
 end
 
-function logistics.mashStatus()
+function logistics.mashStatus(from)
+  local rows = {}
+  local cap = mcfg().capacity
+  for _, m in pairs(RH.state.mashes or {}) do
+    table.insert(rows, { mash = m, distance = from and util.distance(from, m) or nil })
+  end
+  table.sort(rows, function(a, b)
+    if a.distance and b.distance and a.distance ~= b.distance then return a.distance < b.distance end
+    return logistics.mashCallsign(a.mash) < logistics.mashCallsign(b.mash)
+  end)
+  if #rows == 0 then return "No MASH has been built yet." end
   local lines = {}
-  local unlimited = mcfg().capacity >= 9999
-  for _, name in ipairs(util.keys(RH.state.mashes)) do
-    local m = RH.state.mashes[name]
-    if unlimited then
-      table.insert(lines, string.format("%s: %d patients (unlimited)", name, m.patients))
+  for _, row in ipairs(rows) do
+    local call = logistics.mashCallsign(row.mash)
+    local count = string.format("%d/%d pilots", row.mash.patients or 0, cap)
+    if row.distance then
+      table.insert(lines, string.format("%s - %.1f km - %s", call, row.distance / 1000, count))
     else
-      table.insert(lines, string.format("%s: %d/%d patients", name, m.patients, mcfg().capacity))
+      table.insert(lines, string.format("%s - %s", call, count))
     end
   end
-  if #lines == 0 then return "No MASH has been built yet." end
   return table.concat(lines, "\n")
 end
 
@@ -2765,13 +2829,18 @@ function logistics.start()
       logistics.equipEditorFarps()
       logistics.syncPads()
       logistics.refreshMapLabels()
+      logistics.refreshMashLabels()
       if RH.ctld and RH.ctld.refreshZones then RH.ctld.refreshZones() end
     end
     RH.after(2, catchLatePads)
     RH.after(10, catchLatePads)
   end
   logistics.refreshMapLabels()
-  RH.every(30, logistics.refreshMapLabels)
+  logistics.refreshMashLabels()
+  RH.every(30, function()
+    logistics.refreshMapLabels()
+    logistics.refreshMashLabels()
+  end)
   -- Fuel and ammo change while people are flying. Write them down often, not only every five minutes.
   RH.every(30, function()
     if RH.persistence and RH.persistence.save then RH.persistence.save() end
@@ -4284,7 +4353,6 @@ function ctld.attachReturnCommand(inst, group, unit)
     if not group.RHReturnParents[parent] then
       local commands = {
         { "Show logistics zones", function() ctld.showLoadZones(group) end },
-        { "Pack MASH", function() ctld.packMashNearby(inst, group, ctld.liveUnit(group, unit), true) end },
         { "Return crates to tent", function() ctld.returnCratesToTent(inst, group, unit) end },
       }
       for _, command in ipairs(commands) do
@@ -4463,7 +4531,8 @@ function ctld.packMashNearby(inst, group, unit, announceMiss)
   end
   local mash = RH.logistics.packMash(name)
   local patients = mash and mash.patients or 0
-  local text = string.format("%s packed. %d MASH crates are on the ground. Load them with CTLD, or with the Chinook rearm and refuel cargo menu.", name, count)
+  local label = mash and RH.logistics.mashCallsign(mash) or "MASH"
+  local text = string.format("%s packed. %d MASH crates are on the ground. Load them with CTLD, or with the Chinook rearm and refuel cargo menu.", label, count)
   if patients > 0 then
     text = text .. string.format(" The %d patients there are no longer at a hospital.", patients)
   end
@@ -5089,7 +5158,9 @@ function csar.buildMenu(inst, group, unitName)
 
   local mash = MENU_GROUP:New(group, "MASH", root)
   MENU_GROUP_COMMAND:New(group, "Check MASH status", mash, function()
-    RH.dcs.messageToUnit(unitName, RH.logistics.mashStatus(), 20)
+    local unit = UNIT and UNIT.FindByName and UNIT:FindByName(unitName)
+    local pos = unit and unit.GetVec2 and unit:GetVec2()
+    RH.dcs.messageToUnit(unitName, RH.logistics.mashStatus(pos), 20)
   end)
   MENU_GROUP_COMMAND:New(group, "Transport task: load patients", mash, function()
     csar.loadPatients(unitName)
@@ -5208,7 +5279,7 @@ function csar.loadPatients(unitName)
   local cap = (RH.config.airframes[unit:getTypeName()] or {}).csar or 6
   local taken = RH.logistics.startTransport(unitName, mashName, cap)
   csar.refreshMashAvailability()
-  RH.dcs.messageToUnit(unitName, string.format("%d patients loaded from %s. Fly them to an airfield.", taken, mashName), 15)
+  RH.dcs.messageToUnit(unitName, string.format("%d patients loaded from %s. Fly them to an airfield.", taken, RH.logistics.mashCallsign(RH.state.mashes[mashName])), 15)
 end
 
 function csar.disembark(group)
@@ -5317,7 +5388,13 @@ function chat.handle(playerName, text)
     end
     RH.dcs.message("blue", #lines > 0 and table.concat(lines, "\n") or "No FARPs yet.", 20)
   elseif cmd == "-mash" then
-    RH.dcs.message("blue", RH.logistics.mashStatus(), 15)
+    local from
+    if RH.dcs.players then
+      for _, player in ipairs(RH.dcs.players()) do
+        if player.name == playerName then from = player.pos break end
+      end
+    end
+    RH.dcs.message("blue", RH.logistics.mashStatus(from), 15)
   elseif cmd == "-save" then
     RH.persistence.save()
     RH.dcs.message("all", "Campaign saved. Ground units are in the save. RH_Editor.miz, beside your mission, is the copy the Mission Editor can open.", 12)

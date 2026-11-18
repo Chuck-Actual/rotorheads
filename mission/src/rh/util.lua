@@ -22,6 +22,25 @@ function util.toVec2(p)
   return { x = p.x, y = p.y }
 end
 
+-- YE72 is the 100 km square plus the first easting digit and the first northing digit.
+function util.mgrsSquare(mgrs)
+  if type(mgrs) ~= "table" or type(mgrs.MGRSDigraph) ~= "string" or mgrs.MGRSDigraph == "" then return nil end
+  local function digit(value)
+    if type(value) == "number" then
+      local meters = math.floor(value)
+      if meters < 0 then meters = 0 end
+      if meters >= 100000 then meters = meters % 100000 end
+      return string.sub(string.format("%05d", meters), 1, 1)
+    end
+    local text = tostring(value or "")
+    if text == "" then return nil end
+    return string.sub(text, 1, 1)
+  end
+  local east, north = digit(mgrs.Easting), digit(mgrs.Northing)
+  if not east or not north then return nil end
+  return mgrs.MGRSDigraph .. east .. north
+end
+
 function util.distance(a, b)
   local p, q = util.toVec2(a), util.toVec2(b)
   local dx, dy = p.x - q.x, p.y - q.y

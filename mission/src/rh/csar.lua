@@ -463,7 +463,9 @@ function csar.buildMenu(inst, group, unitName)
 
   local mash = MENU_GROUP:New(group, "MASH", root)
   MENU_GROUP_COMMAND:New(group, "Check MASH status", mash, function()
-    RH.dcs.messageToUnit(unitName, RH.logistics.mashStatus(), 20)
+    local unit = UNIT and UNIT.FindByName and UNIT:FindByName(unitName)
+    local pos = unit and unit.GetVec2 and unit:GetVec2()
+    RH.dcs.messageToUnit(unitName, RH.logistics.mashStatus(pos), 20)
   end)
   MENU_GROUP_COMMAND:New(group, "Transport task: load patients", mash, function()
     csar.loadPatients(unitName)
@@ -582,7 +584,7 @@ function csar.loadPatients(unitName)
   local cap = (RH.config.airframes[unit:getTypeName()] or {}).csar or 6
   local taken = RH.logistics.startTransport(unitName, mashName, cap)
   csar.refreshMashAvailability()
-  RH.dcs.messageToUnit(unitName, string.format("%d patients loaded from %s. Fly them to an airfield.", taken, mashName), 15)
+  RH.dcs.messageToUnit(unitName, string.format("%d patients loaded from %s. Fly them to an airfield.", taken, RH.logistics.mashCallsign(RH.state.mashes[mashName])), 15)
 end
 
 function csar.disembark(group)

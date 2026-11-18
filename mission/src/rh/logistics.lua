@@ -801,9 +801,10 @@ function logistics.buildMash(point, builtBy)
   local ok, reason = logistics.validateMashSite(point)
   if not ok then return nil, reason end
   local name = string.format("MASH %02d", util.count(RH.state.mashes) + 1)
-  logistics.registerMash(name, point, true)
+  local mash = logistics.registerMash(name, point, true)
   RH.dcs.spawnMash(name, point)
-  RH.dcs.message("blue", string.format("%s built %s.", builtBy or "A pilot", name), 15)
+  logistics.refreshMashLabels()
+  RH.dcs.message("blue", string.format("%s built %s.", builtBy or "A pilot", logistics.mashCallsign(mash)), 15)
   return name
 end
 
@@ -845,7 +846,30 @@ function logistics.packMash(name)
   elseif RH.dcs.destroyStatic then
     RH.dcs.destroyStatic(tentName)
   end
+  if RH.dcs.removeDrawing then RH.dcs.removeDrawing("mash-" .. name) end
   return mash
+end
+
+function logistics.mashCallsign(mash)
+  if not mash then return "MASH" end
+  local grid = mash.grid
+  if not grid and RH.dcs.mgrsGrid then grid = RH.dcs.mgrsGrid(mash) end
+  if type(grid) == "string" and grid ~= "" then return "MASH " .. grid end
+  return "MASH"
+end
+
+function logistics.mashLabelPoint(mash)
+  return util.offset(mash, math.pi / 2, 12)
+end
+
+function logistics.refreshMashLabels()
+  if not RH.dcs.drawLabel then return end
+  for name, mash in pairs(RH.state.mashes or {}) do
+    if mash.player and mash.x then
+      local ok, err = pcall(RH.dcs.drawLabel, "mash-" .. name, "blue", logistics.mashLabelPoint(mash), "MASH", 16, nil, { 0.25, 0.62, 1, 1 })
+      if not ok then util.log("MASH label %s failed: %s", tostring(name), tostring(err)) end
+    end
+  end
 end
 
 -- Editor zones and the save from the old MASH tent are not hospitals. Only a player build is.
@@ -876,6 +900,7 @@ function logistics.spawnPlayerMashes()
   for name, mash in pairs(RH.state.mashes) do
     RH.dcs.spawnMash(name, mash)
   end
+  logistics.refreshMashLabels()
 end
 
 function logistics.mashAt(point, radius)
@@ -895,22 +920,31 @@ end
 
 function logistics.mashFull(mashName)
   local m = RH.state.mashes[mashName]
-  if not m or mcfg().capacity >= 9999 then return false end
+  if not m then return false end
   return m.patients >= mcfg().capacity
 end
 
-function logistics.mashStatus()
+function logistics.mashStatus(from)
+  local rows = {}
+  local cap = mcfg().capacity
+  for _, m in pairs(RH.state.mashes or {}) do
+    table.insert(rows, { mash = m, distance = from and util.distance(from, m) or nil })
+  end
+  table.sort(rows, function(a, b)
+    if a.distance and b.distance and a.distance ~= b.distance then return a.distance < b.distance end
+    return logistics.mashCallsign(a.mash) < logistics.mashCallsign(b.mash)
+  end)
+  if #rows == 0 then return "No MASH has been built yet." end
   local lines = {}
-  local unlimited = mcfg().capacity >= 9999
-  for _, name in ipairs(util.keys(RH.state.mashes)) do
-    local m = RH.state.mashes[name]
-    if unlimited then
-      table.insert(lines, string.format("%s: %d patients (unlimited)", name, m.patients))
+  for _, row in ipairs(rows) do
+    local call = logistics.mashCallsign(row.mash)
+    local count = string.format("%d/%d pilots", row.mash.patients or 0, cap)
+    if row.distance then
+      table.insert(lines, string.format("%s - %.1f km - %s", call, row.distance / 1000, count))
     else
-      table.insert(lines, string.format("%s: %d/%d patients", name, m.patients, mcfg().capacity))
+      table.insert(lines, string.format("%s - %s", call, count))
     end
   end
-  if #lines == 0 then return "No MASH has been built yet." end
   return table.concat(lines, "\n")
 end
 
@@ -949,13 +983,18 @@ function logistics.start()
       logistics.equipEditorFarps()
       logistics.syncPads()
       logistics.refreshMapLabels()
+      logistics.refreshMashLabels()
       if RH.ctld and RH.ctld.refreshZones then RH.ctld.refreshZones() end
     end
     RH.after(2, catchLatePads)
     RH.after(10, catchLatePads)
   end
   logistics.refreshMapLabels()
-  RH.every(30, logistics.refreshMapLabels)
+  logistics.refreshMashLabels()
+  RH.every(30, function()
+    logistics.refreshMapLabels()
+    logistics.refreshMashLabels()
+  end)
   -- Fuel and ammo change while people are flying. Write them down often, not only every five minutes.
   RH.every(30, function()
     if RH.persistence and RH.persistence.save then RH.persistence.save() end

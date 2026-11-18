@@ -149,10 +149,10 @@ RH.config = {
     crateMass = 400,
     -- A MASH builds only inside this distance of a FARP or Logistics Center.
     nearSite = 1000,
-    -- CTLD Pack, and Pack MASH, reach a hospital tent inside this distance of the helicopter.
+    -- CTLD Pack crates reaches a hospital tent inside this distance of the helicopter.
     packRadius = 100,
-    -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
-    capacity = 9999,
+    -- Pilots a hospital tent can hold. A full MASH stops taking rescues until a transport task frees slots.
+    capacity = 30,
     -- Drop off rescued pilots within this distance of the hospital tent.
     radius = 150,
   },
