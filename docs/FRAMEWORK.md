@@ -64,6 +64,8 @@ A MASH exists only after a player builds the 6-crate MASH kit. An editor zone na
 
 The only build check is distance. `logistics.validateMashSite` allows the build when the point is within 1 km of a FARP or Logistics Center, including that site's load points. Pads, statics, and ground units do not block it. Outside that 1 km the build is refused and the pilot is told they are not within 1000 m of a FARP or Logistics Center. CTLD's load circle is separate: 150 m around a FARP tent (`config.farp.loadRadius`) and 500 m around a logistics center (`config.farp.lcLoadRadius`). `nobuildinloadzones` is off, so a crate set can be built inside that circle. The hospital is a `Tent04` named `<name> tent`. `ctld.ensureKitTemplate` copies `RH_TPL_BLUE_MASH_KIT` when that group is missing, so **FARP AND MASH** lists MASH Crate. Building it calls `logistics.buildMash`.
 
+CTLD Pack crates, and the Pack MASH command on the CTLD menu, decommission a player MASH within 100 m. `logistics.packMash` deletes the tent and the save entry. CTLD then places the same 6 MASH crates on the ground beside the helicopter. Those are normal cargo statics: a utility helicopter loads them with CTLD, and the Chinook loads them from the rearm and refuel cargo menu. Packing does not take crates out of FARP stock. The crates can be hauled to a FARP or a logistics center and returned there like any other crate.
+
 CSAR uses `RH_TPL_DOWNED_PILOT` and the MOOSE CSAR module. Drop-off is that tent, on the ground, within 150 m. Capacity stays unlimited until transport tasks matter.
 
 ### The rest

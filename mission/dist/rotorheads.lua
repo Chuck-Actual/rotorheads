@@ -340,6 +340,8 @@ RH.config = {
     crateMass = 400,
     -- A MASH builds only inside this distance of a FARP or Logistics Center.
     nearSite = 1000,
+    -- CTLD Pack, and Pack MASH, reach a hospital tent inside this distance of the helicopter.
+    packRadius = 100,
     -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
     capacity = 9999,
     -- Drop off rescued pilots within this distance of the hospital tent.
@@ -2621,6 +2623,47 @@ function logistics.buildMash(point, builtBy)
   return name
 end
 
+function logistics.nearestPlayerMash(point, radius)
+  radius = radius or mcfg().packRadius or 100
+  local bestName, best, bestDist
+  for name, mash in pairs(RH.state.mashes or {}) do
+    if mash.player then
+      local d = util.distance(mash, point)
+      if d <= radius and (not bestDist or d < bestDist) then
+        bestName, best, bestDist = name, mash, d
+      end
+    end
+  end
+  return bestName, best, bestDist
+end
+
+-- Take one player MASH out of the campaign and delete its hospital tent. The crates are CTLD's job.
+function logistics.packMash(name)
+  local mash = RH.state.mashes and RH.state.mashes[name]
+  if not mash or not mash.player then return nil end
+  local tentName = name .. " tent"
+  RH.state.mashes[name] = nil
+  local saved = RH.state.world
+  if saved and saved.objects then
+    local objects = {}
+    for _, obj in ipairs(saved.objects) do
+      if obj.name ~= tentName then objects[#objects + 1] = obj end
+    end
+    saved.objects = objects
+  end
+  if saved and saved.baseline then saved.baseline[tentName] = nil end
+  if RH.dcs.staticObjects and RH.dcs.destroyStatic then
+    for _, static in ipairs(RH.dcs.staticObjects()) do
+      local sameTent = static.name == tentName
+      local leftover = logistics.isMashTent(static) and util.distance(static, mash) <= 30
+      if sameTent or leftover then RH.dcs.destroyStatic(static.name) end
+    end
+  elseif RH.dcs.destroyStatic then
+    RH.dcs.destroyStatic(tentName)
+  end
+  return mash
+end
+
 -- Editor zones and the save from the old MASH tent are not hospitals. Only a player build is.
 function logistics.spawnPlayerMashes()
   local keep = {}
@@ -4241,6 +4284,7 @@ function ctld.attachReturnCommand(inst, group, unit)
     if not group.RHReturnParents[parent] then
       local commands = {
         { "Show logistics zones", function() ctld.showLoadZones(group) end },
+        { "Pack MASH", function() ctld.packMashNearby(inst, group, ctld.liveUnit(group, unit), true) end },
         { "Return crates to tent", function() ctld.returnCratesToTent(inst, group, unit) end },
       }
       for _, command in ipairs(commands) do
@@ -4361,9 +4405,86 @@ function ctld.installMenus(inst)
   end
 end
 
+function ctld.pilotPoint(group, unit)
+  if unit and unit.GetVec2 then
+    local point = unit:GetVec2()
+    if point and point.x then return point end
+  end
+  if group and group.GetVec2 then
+    local point = group:GetVec2()
+    if point and point.x then return point end
+  end
+  if unit and unit.GetCoordinate then
+    local coord = unit:GetCoordinate()
+    if coord and coord.GetVec2 then return coord:GetVec2() end
+  end
+  if group and group.GetCoordinate then
+    local coord = group:GetCoordinate()
+    if coord and coord.GetVec2 then return coord:GetVec2() end
+  end
+end
+
+function ctld.mashCargo(inst)
+  local wanted = RH.config.kits.mash.name
+  for _, list in ipairs({ inst.Cargo_Crates, inst.Cargo_Statics }) do
+    for _, cargo in pairs(list or {}) do
+      local name = cargo.GetName and cargo:GetName() or cargo.Name
+      if name == wanted then return cargo end
+    end
+  end
+end
+
+-- Pack turns the hospital tent back into the six MASH crates. They are ordinary CTLD cargo
+-- statics, so a utility helicopter loads them from CTLD and the Chinook loads them from rearm/refuel.
+function ctld.packMashNearby(inst, group, unit, announceMiss)
+  local point = ctld.pilotPoint(group, unit)
+  if not point then
+    if announceMiss then ctld.reply(group, "Cannot find the helicopter, so the MASH was left up.") end
+    return false, false
+  end
+  local reach = RH.config.mash.packRadius or 100
+  local name = RH.logistics.nearestPlayerMash(point, reach)
+  if not name then
+    if announceMiss then
+      ctld.reply(group, string.format("No MASH within %d m. Land next to the hospital tent and pack again.", reach))
+    end
+    return false, false
+  end
+  local cargo = ctld.mashCargo(inst)
+  if not cargo or not inst._GetCrates then
+    ctld.reply(group, "MASH crates are not on the CTLD list, so the tent was left up.")
+    return false, true
+  end
+  local count = RH.config.mash.crates or 6
+  local placed = inst:_GetCrates(group, unit, cargo, count, false, true, true)
+  if placed ~= true then
+    ctld.reply(group, name .. " is still up. The crates were not placed.")
+    return false, true
+  end
+  local mash = RH.logistics.packMash(name)
+  local patients = mash and mash.patients or 0
+  local text = string.format("%s packed. %d MASH crates are on the ground. Load them with CTLD, or with the Chinook rearm and refuel cargo menu.", name, count)
+  if patients > 0 then
+    text = text .. string.format(" The %d patients there are no longer at a hospital.", patients)
+  end
+  ctld.reply(group, text)
+  return true, true
+end
+
 function ctld.installHooks(inst)
+  local packNearby = inst._PackCratesNearby
+  if packNearby then
+    function inst:_PackCratesNearby(Group, Unit, ...)
+      local packed, found = ctld.packMashNearby(self, Group, Unit, false)
+      if found then return packed end
+      return packNearby(self, Group, Unit, ...)
+    end
+  end
+
   -- Per-FARP crate stock. LCs and ships are unlimited; FARP construction crates only come from LCs and ships.
-  function inst:CanGetCrates(Group, Unit, Cargo, number)
+  -- Packing a MASH places crates that already exist. It does not draw them from FARP stock.
+  function inst:CanGetCrates(Group, Unit, Cargo, number, drop, pack)
+    if pack then return true end
     local point = Unit and Unit.GetVec2 and Unit:GetVec2()
     local farp = point and RH.logistics.farpAt(point)
     if not farp and point and RH.logistics.nearestTent then

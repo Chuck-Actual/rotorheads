@@ -180,12 +180,14 @@ T.test("Return crates to tent is on the CTLD menu", function()
   RH.ctld.installMenus(inst)
   inst:_RefreshF10Menus()
   inst:_RefreshF10Menus()
-  T.eq(#added, 4)
+  T.eq(#added, 6)
   T.eq(added[1].label, "Show logistics zones")
   T.eq(added[1].parent.name, "top")
-  T.eq(added[2].label, "Return crates to tent")
-  T.eq(added[3].parent.name, "crates")
-  T.eq(added[4].label, "Return crates to tent")
+  T.eq(added[2].label, "Pack MASH")
+  T.eq(added[3].label, "Return crates to tent")
+  T.eq(added[4].parent.name, "crates")
+  T.eq(added[5].label, "Pack MASH")
+  T.eq(added[6].label, "Return crates to tent")
   RH.ctld.instance = { _SendMessage = function() end }
   RH.ctld.returnCratesToTent(inst, group, unit)
   T.eq(removed, 0)
@@ -535,6 +537,63 @@ T.test("an editor MASH zone is not spawned and its tent is removed", function()
   T.eq(RH.state.world.baseline["MASH Bassel tent"], nil)
   T.ok(RH.world.excluded("MASH Bassel tent"))
   T.ok(not RH.world.excluded("RH_FARP_Bassel Tent"))
+end)
+
+T.test("packing a MASH removes the tent and places the six build crates", function()
+  local w = setup()
+  dofile("src/rh/ctld.lua")
+  RH.logistics.buildMash({ x = 40000, y = 0 }, "Medic")
+  RH.state.mashes["MASH 01"].patients = 2
+  w.statics["MASH 01 tent"] = {
+    alive = true, typeName = "Tent04", display = "M92_Tent04", point = { x = 40000, y = 0 }, side = "blue",
+  }
+  RH.state.world = {
+    objects = { { name = "MASH 01 tent", x = 40000, y = 0 } },
+    baseline = { ["MASH 01 tent"] = true },
+  }
+  RH.state.farps["RH_FARP_ALPHA"].crates = 2
+  local calls = {}
+  local replies = {}
+  local cargo = { Name = "MASH Crate", GetName = function() return "MASH Crate" end, GetCratesNeeded = function() return 6 end }
+  local inst = {
+    Cargo_Crates = { cargo },
+    _GetCrates = function(self, group, unit, got, number, drop, pack, quiet)
+      table.insert(calls, { number = number, drop = drop, pack = pack, quiet = quiet, cargo = got })
+      return true
+    end,
+    _SendMessage = function(_, text) replies[#replies + 1] = text end,
+  }
+  RH.ctld.instance = inst
+  local unit = { GetVec2 = function() return { x = 40040, y = 0 } end }
+  local packed, found = RH.ctld.packMashNearby(inst, {}, unit, true)
+  T.eq(packed, true)
+  T.eq(found, true)
+  T.eq(RH.state.mashes["MASH 01"], nil)
+  T.eq(w.statics["MASH 01 tent"].alive, false)
+  T.eq(#RH.state.world.objects, 0)
+  T.eq(RH.state.world.baseline["MASH 01 tent"], nil)
+  T.eq(calls[1].number, 6)
+  T.eq(calls[1].pack, true)
+  T.eq(calls[1].drop, false)
+  T.eq(calls[1].cargo, cargo)
+  T.ok(replies[#replies]:find("6 MASH crates"))
+  T.ok(replies[#replies]:find("2 patients"))
+  RH.logistics.buildMash({ x = 40000, y = 0 }, "Medic")
+  packed, found = RH.ctld.packMashNearby(inst, {}, { GetVec2 = function() return { x = 42000, y = 0 } end }, false)
+  T.eq(packed, false)
+  T.eq(found, false)
+  T.ok(RH.state.mashes["MASH 01"])
+  inst._GetCrates = function() return false end
+  packed, found = RH.ctld.packMashNearby(inst, {}, unit, true)
+  T.eq(packed, false)
+  T.eq(found, true)
+  T.ok(RH.state.mashes["MASH 01"])
+  RH.ctld.installHooks(inst)
+  local stock = RH.state.farps["RH_FARP_ALPHA"].crates
+  T.eq(inst:CanGetCrates({}, unit, cargo, 6, false, true), true)
+  T.eq(RH.state.farps["RH_FARP_ALPHA"].crates, stock)
+  T.eq(inst:CanGetCrates({}, unit, cargo, 6), false)
+  T.eq(RH.state.farps["RH_FARP_ALPHA"].crates, stock)
 end)
 
 T.test("MASH capacity and transport tasks", function()

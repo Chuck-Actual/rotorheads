@@ -807,6 +807,47 @@ function logistics.buildMash(point, builtBy)
   return name
 end
 
+function logistics.nearestPlayerMash(point, radius)
+  radius = radius or mcfg().packRadius or 100
+  local bestName, best, bestDist
+  for name, mash in pairs(RH.state.mashes or {}) do
+    if mash.player then
+      local d = util.distance(mash, point)
+      if d <= radius and (not bestDist or d < bestDist) then
+        bestName, best, bestDist = name, mash, d
+      end
+    end
+  end
+  return bestName, best, bestDist
+end
+
+-- Take one player MASH out of the campaign and delete its hospital tent. The crates are CTLD's job.
+function logistics.packMash(name)
+  local mash = RH.state.mashes and RH.state.mashes[name]
+  if not mash or not mash.player then return nil end
+  local tentName = name .. " tent"
+  RH.state.mashes[name] = nil
+  local saved = RH.state.world
+  if saved and saved.objects then
+    local objects = {}
+    for _, obj in ipairs(saved.objects) do
+      if obj.name ~= tentName then objects[#objects + 1] = obj end
+    end
+    saved.objects = objects
+  end
+  if saved and saved.baseline then saved.baseline[tentName] = nil end
+  if RH.dcs.staticObjects and RH.dcs.destroyStatic then
+    for _, static in ipairs(RH.dcs.staticObjects()) do
+      local sameTent = static.name == tentName
+      local leftover = logistics.isMashTent(static) and util.distance(static, mash) <= 30
+      if sameTent or leftover then RH.dcs.destroyStatic(static.name) end
+    end
+  elseif RH.dcs.destroyStatic then
+    RH.dcs.destroyStatic(tentName)
+  end
+  return mash
+end
+
 -- Editor zones and the save from the old MASH tent are not hospitals. Only a player build is.
 function logistics.spawnPlayerMashes()
   local keep = {}
