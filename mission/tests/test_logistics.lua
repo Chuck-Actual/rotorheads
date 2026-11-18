@@ -81,6 +81,56 @@ T.test("editor pads are labeled FARP ALPHA and FARP BRAVO with a crate count", f
   for _, name in ipairs(w.farpsSpawned) do T.ok(name ~= "static1-4" and name ~= "static1-5") end
 end)
 
+T.test("an editor tent shows crates at startup, limits pulls, and gets one Humvee", function()
+  local w = setup()
+  w.statics.tent = { alive = true, point = { x = 80000, y = 1000 }, typeName = "FARP Tent" }
+  table.insert(w.airbases, { name = "static-pad", point = { x = 80040, y = 1000 }, kind = "helipad", coalition = "blue" })
+  local spawned = {}
+  local fueled = {}
+  RH.dcs.objectExists = function(name) return spawned[name] ~= nil end
+  RH.dcs.spawnVehicle = function(name, typeName) spawned[name] = typeName end
+  RH.dcs.writePadStock = function(name, stock) fueled[name] = stock.fuelKg end
+  RH.logistics.discoverEditorPads()
+  local farp
+  for _, f in pairs(RH.state.farps) do
+    if f.editor and f.x == 80000 then farp = f end
+  end
+  T.eq(farp.crates, 0)
+  T.ok(string.find(RH.logistics.mapLabelText(farp), "Crates: 0", 1, true) ~= nil)
+  RH.logistics.equipEditorFarps()
+  RH.logistics.equipEditorFarps()
+  T.eq(spawned[farp.name .. " Humvee"], "Hummer")
+  T.eq(fueled["static-pad"], 10000)
+  local n = 0
+  for _ in pairs(spawned) do n = n + 1 end
+  T.eq(n, 1)
+
+  dofile("src/rh/ctld.lua")
+  ZONE = { FindByName = function() return nil end }
+  ZONE_RADIUS = { New = function() end }
+  CTLD = { CargoZoneType = { LOAD = "load" } }
+  SMOKECOLOR = { Blue = 1 }
+  local zones = {}
+  local inst = {
+    AddCTLDZone = function(_, name) zones[#zones + 1] = name end,
+    _SendMessage = function(_, text) end,
+  }
+  RH.ctld.instance = inst
+  T.eq(RH.ctld.addFarpZone(farp), true)
+  T.eq(#zones, 1)
+  T.eq(RH.ctld.addFarpZone(farp), nil)
+  RH.ctld.installHooks(inst)
+  local unit = { GetVec2 = function() return { x = 80005, y = 1005 } end }
+  local cargo = { GetName = function() return "Avenger" end, GetCratesNeeded = function() return 1 end }
+  T.eq(inst:CanGetCrates({}, unit, cargo, 1), false)
+  T.eq(farp.crates, 0)
+  farp.crates = 25
+  T.eq(inst:CanGetCrates({}, unit, cargo, 1), true)
+  T.eq(farp.crates, 24)
+  T.eq(inst:CanGetCrates({}, unit, cargo, 30), false)
+  T.eq(farp.crates, 24)
+end)
+
 T.test("the load circle sits on the FARP tent, not the pad", function()
   local w = setup()
   dofile("src/rh/ctld.lua")

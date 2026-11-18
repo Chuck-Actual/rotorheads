@@ -54,6 +54,8 @@ The editor pads are separate. On the first start after this change, `logistics.s
 
 A script-built FARP that lands within 400 m of an editor pad or tent is a duplicate. `logistics.dropStackedFarps` deletes that copy, including `FARP 01` and its tent, depots, and Humvee, and the editor pad keeps the crate count. A marked FARP in an empty field is still spawned.
 
+The editor tent is a CTLD load zone. Troops can always be picked up there. Ground-unit crates can be picked up only while the FARP stock covers them. `logistics.equipEditorFarps` parks the missing Humvee by that tent and writes the pad's fuel and missile grant, so rearm and defuel work at the FARP that was already in the mission.
+
 ### MASH and CSAR
 
 MASH separation is 16 km. A MASH zone in the editor is registered, and the tent is spawned beside it. CSAR uses `RH_TPL_DOWNED_PILOT` and the MOOSE CSAR module. Drop-off is at the MASH.

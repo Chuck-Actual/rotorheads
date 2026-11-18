@@ -99,8 +99,15 @@ function ctld.tentPoints(farp)
   return { { x = farp.x, y = farp.y } }, false
 end
 
+function ctld.refreshZones()
+  if not ctld.instance or not RH.logistics then return end
+  for _, farp in ipairs(RH.logistics.farps()) do
+    ctld.addFarpZone(farp)
+  end
+end
+
 function ctld.addFarpZone(farp)
-  if not ctld.instance then return end
+  if not ctld.instance or farp.loadZoneReady then return end
   local points, atTent = ctld.tentPoints(farp)
   farp.loadPoints = points
   local radius = RH.config.farp.loadRadius
@@ -112,11 +119,13 @@ function ctld.addFarpZone(farp)
     else
       ZONE_RADIUS:New(zoneName, { x = point.x, y = point.y }, radius)
     end
+    -- LOAD covers troops and crates. Troops are not taken from the crate stock.
     ctld.instance:AddCTLDZone(zoneName, CTLD.CargoZoneType.LOAD, SMOKECOLOR.Blue, true, false)
     local id = "rh-load-" .. farp.name .. "-" .. i
     RH.dcs.drawCircle(id, "blue", point, radius, { 0, 0.55, 1, 1 }, { 0, 0.55, 1, 0.18 }, "Load")
     RH.after(60, function() RH.dcs.removeDrawing(id) end)
   end
+  farp.loadZoneReady = true
   return atTent
 end
 
@@ -189,6 +198,9 @@ function ctld.create()
   end
 
   ctld.instance = inst
+  if RH.logistics.discoverEditorPads then RH.logistics.discoverEditorPads() end
+  if RH.logistics.equipEditorFarps then RH.logistics.equipEditorFarps() end
+  if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
   local notes = {}
   for _, farp in ipairs(RH.logistics.farps()) do
     local atTent = ctld.addFarpZone(farp)
@@ -335,7 +347,12 @@ end
 function ctld.installHooks(inst)
   -- Per-FARP crate stock. LCs and ships are unlimited; FARP construction crates only come from LCs and ships.
   function inst:CanGetCrates(Group, Unit, Cargo, number)
-    local farp = RH.logistics.farpAt(Unit:GetVec2())
+    local point = Unit and Unit.GetVec2 and Unit:GetVec2()
+    local farp = point and RH.logistics.farpAt(point)
+    if not farp and point and RH.logistics.nearestTent then
+      local tent = RH.logistics.nearestTent(point, RH.config.farp.loadRadius or 150)
+      if tent then farp = RH.logistics.farpAt(tent, 1000) end
+    end
     if not farp then return true end
     local cargoName = Cargo:GetName()
     local kit = kitName(cargoName)
@@ -345,7 +362,7 @@ function ctld.installHooks(inst)
     end
     local count = tonumber(number) or Cargo:GetCratesNeeded() or 1
     if not RH.logistics.takeCrates(farp, count) then
-      ctld.reply(Group, string.format("%s only has %d crates left. Ask a C-130 or a convoy to resupply it.", farp.name, farp.crates))
+      ctld.reply(Group, string.format("%s only has %d crates left. Ask a C-130 or a convoy to resupply it.", RH.logistics.displayName(farp), farp.crates))
       return false
     end
     return true

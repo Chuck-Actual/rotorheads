@@ -85,19 +85,99 @@ function logistics.editorPads()
   return pads
 end
 
--- A pad with no RH_FARP_ zone still holds crate stock. It is already in the mission, so it is not rebuilt.
+function logistics.isTent(static)
+  local name = string.lower(static.name or "")
+  local kind = string.lower((static.typeName or "") .. " " .. (static.display or ""))
+  if string.find(kind, "tent04", 1, true) or string.find(kind, "m92", 1, true) then return false end
+  if string.find(name, "mash", 1, true) then return false end
+  if string.find(kind, "farp tent", 1, true) or string.find(kind, "palatka", 1, true) then return true end
+  if string.sub(name, -5) == " tent" then return true end
+  return false
+end
+
+function logistics.nearestTent(point, radius)
+  local best, bestDist
+  if not RH.dcs.staticObjects then return nil end
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    if logistics.isTent(static) then
+      local d = util.distance(static, point)
+      if d <= radius and (not bestDist or d < bestDist) then best, bestDist = static, d end
+    end
+  end
+  return best
+end
+
+local function registerEditorSite(name, point, index)
+  if not name or name == "" then return nil end
+  local existing = logistics.farpAt(point, 200)
+  if existing then
+    -- A tent found first keeps the stock. The pad's ALPHA/BRAVO name is the one on the map.
+    if existing.editor and not logistics.isTent(point) then
+      existing.label = logistics.padLabel(name, index)
+    end
+    return nil
+  end
+  local airfield = logistics.airfieldNear(point, fcfg().lcAirfieldRadius)
+  local lc = airfield ~= nil and airfield.coalition ~= "red"
+  return logistics.register(name, point, {
+    editor = true,
+    label = logistics.padLabel(name, index),
+    lc = lc,
+    airbase = airfield and airfield.name,
+    crates = lc and -1 or nil,
+  })
+end
+
+-- A pad or tent with no RH_FARP_ zone still holds crate stock. It is already in the mission, so it is not rebuilt.
 function logistics.discoverEditorPads()
   for i, pad in ipairs(logistics.editorPads()) do
-    if pad.name and pad.name ~= "" and not logistics.farpAt(pad, 500) then
-      local airfield = logistics.airfieldNear(pad, fcfg().lcAirfieldRadius)
-      local lc = airfield ~= nil and airfield.coalition ~= "red"
-      logistics.register(pad.name, pad, {
-        editor = true,
-        label = logistics.padLabel(pad.name, i),
-        lc = lc,
-        airbase = airfield and airfield.name,
-        crates = lc and -1 or nil,
-      })
+    registerEditorSite(pad.name, pad, i)
+  end
+  if not RH.dcs.staticObjects then return end
+  local tents = {}
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    if logistics.isTent(static) then tents[#tents + 1] = static end
+  end
+  table.sort(tents, function(a, b) return (a.name or "") < (b.name or "") end)
+  for _, tent in ipairs(tents) do
+    local index = 0
+    for _ in pairs(RH.state.farps) do index = index + 1 end
+    local name = tent.name ~= "" and tent.name or "FARP"
+    registerEditorSite(name, tent, index + 1)
+  end
+end
+
+-- The editor FARP already has the tent and the pad. It still needs the Humvee the rearm
+-- window uses, and the pad warehouse needs fuel or defuel answers "unable to comply".
+function logistics.equipEditorFarps()
+  for _, farp in pairs(RH.state.farps) do
+    if farp.editor and not farp.lc and not farp.pending then
+      local tent = logistics.nearestTent(farp, 250)
+      local spot = util.offset(tent or farp, math.rad(tent and 180 or 270), tent and 25 or 45)
+      local humvee = farp.name .. " Humvee"
+      if RH.dcs.objectExists and RH.dcs.spawnVehicle and not RH.dcs.objectExists(humvee) then
+        RH.dcs.spawnVehicle(humvee, "Hummer", spot, 90)
+      end
+      if RH.dcs.airbases and RH.dcs.writePadStock then
+        local pad, padDist
+        for _, ab in ipairs(RH.dcs.airbases()) do
+          if ab.kind == "helipad" and ab.coalition ~= "red" then
+            local d = util.distance(ab.point, farp)
+            if d <= 400 and (not padDist or d < padDist) then pad, padDist = ab, d end
+          end
+        end
+        if pad then
+          local stock = logistics.ensurePadStock(pad.name)
+          RH.dcs.writePadStock(pad.name, stock)
+        end
+      end
+      if RH.dcs.writePadStock then
+        for _, site in ipairs(logistics.editorPads()) do
+          if util.distance(site, farp) <= 400 then
+            RH.dcs.writePadStock(site.name, logistics.ensurePadStock(site.name))
+          end
+        end
+      end
     end
   end
 end
@@ -181,7 +261,8 @@ function logistics.displayName(farp)
 end
 
 function logistics.labelPoint(farp)
-  return util.offset(farp, math.pi / 2, 45)
+  local anchor = logistics.nearestTent(farp, 250) or farp
+  return util.offset(anchor, math.pi / 2, 45)
 end
 
 function logistics.mapLabelText(farp)
@@ -727,10 +808,18 @@ function logistics.start()
     RH.dcs.spawnMash(name, m)
   end
   logistics.spawnBuilt()
+  logistics.equipEditorFarps()
   logistics.syncPads()
   if RH.after then
-    RH.after(2, logistics.syncPads)
-    RH.after(10, logistics.syncPads)
+    local function catchLatePads()
+      logistics.discoverEditorPads()
+      logistics.equipEditorFarps()
+      logistics.syncPads()
+      logistics.refreshMapLabels()
+      if RH.ctld and RH.ctld.refreshZones then RH.ctld.refreshZones() end
+    end
+    RH.after(2, catchLatePads)
+    RH.after(10, catchLatePads)
   end
   logistics.refreshMapLabels()
   RH.every(30, logistics.refreshMapLabels)
