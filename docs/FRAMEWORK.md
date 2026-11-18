@@ -38,9 +38,13 @@ Agents read this before editing. When you change a mechanic, update that mechani
 
 ### CTLD
 
-`ctld.lua` builds the MOOSE CTLD menu from `config.lua` `troops`, `vehicles`, and `kits`. Every buildable group is a late-activated mission group named `RH_TPL_BLUE_*`. If a kit template is missing, `ctld.ensureKitTemplate` copies `RH_TPL_BLUE_HMMWV_TOW` so the crate still appears. Built vehicles are moved behind the helicopter by `ctld.placeBehind`. Crate counts are the normal counts in `config.lua`.
+`ctld.lua` builds the MOOSE CTLD menu from `config.lua` `troops`, `vehicles`, and `kits`. Every buildable group is a late-activated mission group named `RH_TPL_BLUE_*`. If a kit template is missing, `ctld.ensureKitTemplate` copies `RH_TPL_BLUE_HMMWV_TOW` so the crate still appears. Built vehicles are moved behind the helicopter by `ctld.placeBehind`.
 
-Not in this build, and not to be assumed: a one-crate test cost, an "all crates or one crate" menu, a flattened troop menu, or joining NASAMS and Roland pieces into one group.
+Vehicle crates use `config.testVehicleCrates`, which is `1`, so each vehicle builds from one crate. Set that value to nil to use the `crates` count on each vehicle. FARP, MASH, outpost, and supply kits keep their own counts.
+
+The crates menu shows the stock of the FARP under the helicopter (`ctld.crateStockText`) and `Return crates to tent`. That command calls CTLD remove-nearby. `OnAfterRemoveCratesNearby` adds the crate worth back onto that FARP, up to `farp.maxCrates`.
+
+Not in this build, and not to be assumed: an "all crates or one crate" menu, a flattened troop menu, or joining NASAMS and Roland pieces into one group.
 
 ### FARPs and logistics
 

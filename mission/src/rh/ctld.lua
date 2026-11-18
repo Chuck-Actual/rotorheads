@@ -165,7 +165,8 @@ function ctld.create()
     inst:AddCratesCargo(name, { template }, kind, crates, mass, nil, subcat, nil, nil, nil, "Cargos", inst.basetype, nil, inst.basetype)
   end
   for _, v in ipairs(c.vehicles) do
-    addCrates(v.name, v.template, CTLD_CARGO.Enum.VEHICLE, v.crates, v.mass, v.subcat)
+    local crates = c.testVehicleCrates or v.crates
+    addCrates(v.name, v.template, CTLD_CARGO.Enum.VEHICLE, crates, v.mass, v.subcat)
   end
   ctld.ensureKitTemplate(c.kits.farp.template)
   addCrates(c.kits.farp.name, c.kits.farp.template, CTLD_CARGO.Enum.FOB, c.farp.cratesForFarp, c.farp.farpCrateMass, "FARP AND MASH")
@@ -197,6 +198,7 @@ function ctld.create()
   end
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)
+  ctld.installMenus(inst)
   inst:__Start(2)
   -- Once the world snapshot exists it restores vehicles and crates itself. Loading CTLD's
   -- csv as well would build a second copy. The first run still reads the csv, so a Humvee
@@ -205,6 +207,41 @@ function ctld.create()
     inst:__Load(10)
   end
   return inst
+end
+
+-- The crates menu names the stock at the FARP the helicopter is sitting in.
+function ctld.crateStockText(unit)
+  local point = unit and unit.GetVec2 and unit:GetVec2()
+  local farp = point and RH.logistics and RH.logistics.farpAt and RH.logistics.farpAt(point)
+  if not farp then return "FARP crates: not at a FARP" end
+  local count = RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
+  return string.format("%s crates: %s", farp.name, count)
+end
+
+function ctld.attachCrateMenus(inst, unitName)
+  if not UNIT or not UNIT.FindByName or not MENU_GROUP_COMMAND then return end
+  local unit = UNIT:FindByName(unitName)
+  local group = unit and unit.GetGroup and unit:GetGroup()
+  if not group or not group.MyTopCratesMenu then return end
+  local parent = group.MyTopCratesMenu
+  if group.RHCrateStock and group.RHCrateStock.Remove then group.RHCrateStock:Remove() end
+  group.RHCrateStock = MENU_GROUP_COMMAND:New(group, ctld.crateStockText(unit), parent, function()
+    ctld.reply(group, ctld.crateStockText(unit))
+  end)
+  if group.RHReturnCrates and group.RHReturnCrates.Remove then group.RHReturnCrates:Remove() end
+  group.RHReturnCrates = MENU_GROUP_COMMAND:New(group, "Return crates to tent", parent, function()
+    if inst._RemoveCratesNearby then inst:_RemoveCratesNearby(group, unit) end
+  end)
+end
+
+function ctld.installMenus(inst)
+  local refresh = inst._RefreshF10Menus
+  function inst:_RefreshF10Menus()
+    if refresh then refresh(self) end
+    for name in pairs(self.CtldUnits or {}) do
+      ctld.attachCrateMenus(self, name)
+    end
+  end
 end
 
 -- Put a freshly built vehicle 10 m behind the tail, facing the same way as the helicopter.

@@ -193,6 +193,44 @@ T.test("MASH capacity and transport tasks", function()
   T.eq(RH.logistics.completeTransport("herc"), 30)
 end)
 
+T.test("the crates menu shows the FARP count and returns crates to the tent", function()
+  setup()
+  local farp = RH.state.farps.RH_FARP_ALPHA
+  farp.crates = 17
+  dofile("src/rh/ctld.lua")
+  local group = { MyTopCratesMenu = {} }
+  local unit = {
+    GetVec2 = function() return { x = 40000, y = 0 } end,
+    GetGroup = function() return group end,
+  }
+  T.eq(RH.ctld.crateStockText(unit), "RH_FARP_ALPHA crates: 17")
+  T.eq(RH.ctld.crateStockText(nil), "FARP crates: not at a FARP")
+  local added = {}
+  MENU_GROUP_COMMAND = {
+    New = function(_, group, text, parent, fn)
+      local item = { group = group, text = text, parent = parent, fn = fn, Remove = function() end }
+      added[#added + 1] = item
+      return item
+    end,
+  }
+  UNIT = { FindByName = function() return unit end }
+  local removed = false
+  local inst = {
+    CtldUnits = { heli = true },
+    _RefreshF10Menus = function() end,
+    _RemoveCratesNearby = function() removed = true end,
+  }
+  RH.ctld.installMenus(inst)
+  inst:_RefreshF10Menus()
+  T.eq(added[1].text, "RH_FARP_ALPHA crates: 17")
+  T.eq(added[1].parent, group.MyTopCratesMenu)
+  T.eq(added[2].text, "Return crates to tent")
+  added[2].fn()
+  T.ok(removed)
+  MENU_GROUP_COMMAND = nil
+  UNIT = nil
+end)
+
 T.test("FARP crate template is copied from the Humvee so Get crates can list it", function()
   T.fresh()
   dofile("src/rh/ctld.lua")

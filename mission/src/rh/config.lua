@@ -200,6 +200,8 @@ RH.config = {
 
   -- Vehicle crates. `crates` is how many small CDS crates must sit within 50 m before Build works.
   -- `mass` is kg per crate. A Humvee is four crates. A Chinook (6 internal) can lift one in a single trip.
+  -- Testing override. Set this to nil to use each vehicle's own crate count.
+  testVehicleCrates = 1,
   vehicles = {
     { name = "M1045 HMMWV TOW", template = "RH_TPL_BLUE_HMMWV_TOW", crates = 4, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
     { name = "M1043 HMMWV MG", template = "RH_TPL_BLUE_HMMWV_MG", crates = 2, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
