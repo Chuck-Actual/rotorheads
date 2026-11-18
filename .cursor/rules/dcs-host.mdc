@@ -5,6 +5,8 @@ alwaysApply: true
 
 # Rotorheads DCS host
 
+Read `docs/FRAMEWORK.md` before editing. It is how this server is built and what each mechanic does now. Before you finish, update the section of that file for the mechanic you changed. That update is how the next agent learns. Do not leave the lesson only in the chat.
+
 The owner hosts a LAN multiplayer server from the DCS client on the same PC. The dedicated server is not in use yet. One DCS install cannot host and edit at the same time. Stop the mission before opening the Mission Editor.
 
 ## Paths
