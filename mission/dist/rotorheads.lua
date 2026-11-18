@@ -329,7 +329,7 @@ RH.config = {
   },
 
   mash = {
-    crates = 4,
+    crates = 6,
     crateMass = 400,
     minSeparation = 16000,
     -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
@@ -392,31 +392,56 @@ RH.config = {
   -- Vehicle crates. `crates` is how many small CDS crates must sit within 50 m before Build works.
   -- `mass` is kg per crate. A Humvee is four crates. A Chinook (6 internal) can lift one in a single trip.
   vehicles = {
-    { name = "Humvee (JTAC)", template = "RH_TPL_BLUE_HMMWV_JTAC", crates = 4, mass = 300, subcat = "Recon" },
-    { name = "Humvee TOW", template = "RH_TPL_BLUE_HMMWV_TOW", crates = 4, mass = 300, subcat = "Anti-Tank" },
-    { name = "M1126 Stryker ICV", template = "RH_TPL_BLUE_STRYKER", crates = 2, mass = 1500, subcat = "Armor" },
-    { name = "M1128 Stryker MGS", template = "RH_TPL_BLUE_STRYKER_MGS", crates = 3, mass = 1500, subcat = "Armor" },
-    { name = "M2A2 Bradley", template = "RH_TPL_BLUE_BRADLEY", crates = 3, mass = 1500, subcat = "Armor" },
-    { name = "M1A2 Abrams", template = "RH_TPL_BLUE_ABRAMS", crates = 4, mass = 2000, subcat = "Armor" },
-    { name = "Leopard 2", template = "RH_TPL_BLUE_LEO2", crates = 4, mass = 2000, subcat = "Armor" },
-    { name = "M109 Paladin", template = "RH_TPL_BLUE_M109", crates = 3, mass = 1500, subcat = "Artillery" },
-    { name = "M163 Vulcan", template = "RH_TPL_BLUE_VULCAN", crates = 2, mass = 1200, subcat = "SHORAD" },
-    { name = "Gepard", template = "RH_TPL_BLUE_GEPARD", crates = 3, mass = 1500, subcat = "SHORAD" },
-    { name = "M1097 Avenger", template = "RH_TPL_BLUE_AVENGER", crates = 2, mass = 1200, subcat = "SHORAD" },
-    { name = "Roland ADS", template = "RH_TPL_BLUE_ROLAND", crates = 3, mass = 1500, subcat = "SHORAD" },
-    { name = "NASAMS Radar", template = "RH_TPL_BLUE_NASAMS_RADAR", crates = 2, mass = 1500, subcat = "SAM" },
-    { name = "NASAMS C2", template = "RH_TPL_BLUE_NASAMS_C2", crates = 2, mass = 1500, subcat = "SAM" },
-    { name = "NASAMS Launcher", template = "RH_TPL_BLUE_NASAMS_LN", crates = 2, mass = 1500, subcat = "SAM" },
-    { name = "Hawk Site", template = "RH_TPL_BLUE_HAWK", crates = 6, mass = 1500, subcat = "SAM" },
-    { name = "M939 Ammo Truck", template = "RH_TPL_BLUE_AMMO", crates = 2, mass = 1000, subcat = "Support" },
-    { name = "M978 Fuel Tanker", template = "RH_TPL_BLUE_FUEL", crates = 2, mass = 1500, subcat = "Support" },
+    { name = "M1045 HMMWV TOW", template = "RH_TPL_BLUE_HMMWV_TOW", crates = 4, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
+    { name = "M1043 HMMWV MG", template = "RH_TPL_BLUE_HMMWV_MG", crates = 2, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
+    { name = "MaxxPro MRAP", template = "RH_TPL_BLUE_MAXXPRO", crates = 3, mass = 500, subcat = "ATV - HMMV - MRAP VEHICLES" },
+    { name = "HMMWV M1025 JTAC", template = "RH_TPL_BLUE_HMMWV_JTAC", crates = 3, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
+
+    { name = "M1A2C SEPV3", template = "RH_TPL_BLUE_ABRAMS", crates = 11, mass = 2000, subcat = "HEAVY ARMOURED VEHICLES" },
+    { name = "CHIEFTAIN MK3", template = "RH_TPL_BLUE_CHIEFTAIN", crates = 10, mass = 2000, subcat = "HEAVY ARMOURED VEHICLES" },
+    { name = "MERKAVA MK4", template = "RH_TPL_BLUE_MERKAVA", crates = 12, mass = 2000, subcat = "HEAVY ARMOURED VEHICLES" },
+    { name = "LECLERC", template = "RH_TPL_BLUE_LECLERC", crates = 10, mass = 2000, subcat = "HEAVY ARMOURED VEHICLES" },
+    { name = "LEOPARD 1A3", template = "RH_TPL_BLUE_LEO1", crates = 10, mass = 2000, subcat = "HEAVY ARMOURED VEHICLES" },
+    { name = "LEOPARD 2", template = "RH_TPL_BLUE_LEO2", crates = 10, mass = 2000, subcat = "HEAVY ARMOURED VEHICLES" },
+
+    { name = "IFV M2A2 Bradley", template = "RH_TPL_BLUE_BRADLEY", crates = 7, mass = 1500, subcat = "LIGHT ARMOURED VEHICLES" },
+    { name = "LAV-25", template = "RH_TPL_BLUE_LAV25", crates = 4, mass = 1200, subcat = "LIGHT ARMOURED VEHICLES" },
+    { name = "MARDER", template = "RH_TPL_BLUE_MARDER", crates = 4, mass = 1500, subcat = "LIGHT ARMOURED VEHICLES" },
+    { name = "VAB MEPHISTO", template = "RH_TPL_BLUE_VAB", crates = 6, mass = 1200, subcat = "LIGHT ARMOURED VEHICLES" },
+    { name = "TPZ FUCHS", template = "RH_TPL_BLUE_FUCHS", crates = 3, mass = 1000, subcat = "LIGHT ARMOURED VEHICLES" },
+    { name = "AAV7", template = "RH_TPL_BLUE_AAV7", crates = 5, mass = 1500, subcat = "LIGHT ARMOURED VEHICLES" },
+    { name = "M1126 Stryker ICV", template = "RH_TPL_BLUE_STRYKER", crates = 4, mass = 1500, subcat = "LIGHT ARMOURED VEHICLES" },
+    { name = "M1128 Stryker MGS", template = "RH_TPL_BLUE_STRYKER_MGS", crates = 5, mass = 1500, subcat = "LIGHT ARMOURED VEHICLES" },
+
+    { name = "C-RAM", template = "RH_TPL_BLUE_CRAM", crates = 9, mass = 1500, subcat = "ANTI-AIR SHORT RANGE" },
+    { name = "M6 LINEBACKER", template = "RH_TPL_BLUE_LINEBACKER", crates = 8, mass = 1500, subcat = "ANTI-AIR SHORT RANGE" },
+    { name = "VULCAN M163", template = "RH_TPL_BLUE_VULCAN", crates = 5, mass = 1200, subcat = "ANTI-AIR SHORT RANGE" },
+    { name = "GEPARD", template = "RH_TPL_BLUE_GEPARD", crates = 6, mass = 1500, subcat = "ANTI-AIR SHORT RANGE" },
+    { name = "ZU-23 AA GUN", template = "RH_TPL_BLUE_ZU23", crates = 3, mass = 800, subcat = "ANTI-AIR SHORT RANGE" },
+    { name = "M1097 AVENGER", template = "RH_TPL_BLUE_AVENGER", crates = 4, mass = 1200, subcat = "ANTI-AIR SHORT RANGE" },
+
+    { name = "NASAMS 2 CP", template = "RH_TPL_BLUE_NASAMS_C2", crates = 6, mass = 1500, subcat = "ANTI-AIR LONG RANGE" },
+    { name = "NASAMS LN B", template = "RH_TPL_BLUE_NASAMS_LNB", crates = 8, mass = 1500, subcat = "ANTI-AIR LONG RANGE" },
+    { name = "NASAMS LN C", template = "RH_TPL_BLUE_NASAMS_LNC", crates = 9, mass = 1500, subcat = "ANTI-AIR LONG RANGE" },
+    { name = "NASAMS RADAR", template = "RH_TPL_BLUE_NASAMS_RADAR", crates = 6, mass = 1500, subcat = "ANTI-AIR LONG RANGE" },
+    { name = "ROLAND ADS", template = "RH_TPL_BLUE_ROLAND", crates = 8, mass = 1500, subcat = "ANTI-AIR LONG RANGE" },
+    { name = "ROLAND RADAR", template = "RH_TPL_BLUE_ROLAND_RADAR", crates = 6, mass = 1500, subcat = "ANTI-AIR LONG RANGE" },
+    { name = "HAWK SITE", template = "RH_TPL_BLUE_HAWK", crates = 6, mass = 1500, subcat = "ANTI-AIR LONG RANGE" },
+
+    { name = "L118", template = "RH_TPL_BLUE_L118", crates = 7, mass = 1500, subcat = "ARTILLERY" },
+    { name = "T155 FIRTINA", template = "RH_TPL_BLUE_FIRTINA", crates = 9, mass = 2000, subcat = "ARTILLERY" },
+    { name = "M109 PALADIN", template = "RH_TPL_BLUE_M109", crates = 8, mass = 1500, subcat = "ARTILLERY" },
+
+    { name = "M939 SUPPORT TRUCK", template = "RH_TPL_BLUE_AMMO", crates = 4, mass = 1000, subcat = "SUPPORT AND SUPPLIES" },
+    { name = "M1083 SUPPORT TRUCK", template = "RH_TPL_BLUE_M1083", crates = 4, mass = 1000, subcat = "SUPPORT AND SUPPLIES" },
+    { name = "M978 FUEL TANKER", template = "RH_TPL_BLUE_FUEL", crates = 4, mass = 1500, subcat = "SUPPORT AND SUPPLIES" },
   },
 
   -- Construction kits. These templates are placeholders: the script replaces them with the real structure.
   kits = {
-    farp = { name = "FARP crate", template = "RH_TPL_BLUE_FARP_KIT" },
-    mash = { name = "MASH crate", template = "RH_TPL_BLUE_MASH_KIT" },
-    outpost = { name = "Outpost crate", template = "RH_TPL_BLUE_OUTPOST_KIT", crates = 2, mass = 800 },
+    farp = { name = "FARP Crate", template = "RH_TPL_BLUE_FARP_KIT" },
+    mash = { name = "MASH Crate", template = "RH_TPL_BLUE_MASH_KIT" },
+    outpost = { name = "OUTPOST", template = "RH_TPL_BLUE_OUTPOST_KIT", crates = 4, mass = 800 },
     uhRepair = { name = "UH Repair kit", template = "RH_TPL_BLUE_UHREPAIR_KIT", crates = 1, mass = 300, lifetime = 1800 },
     -- One physical general-supply crate. Returned at a FARP tent it adds `worth` to that FARP's count.
     -- The logistics menu offers batches of 1, 5, and 10 of these crates. Logistics Centers only.
@@ -3568,14 +3593,14 @@ function ctld.create()
     addCrates(v.name, v.template, CTLD_CARGO.Enum.VEHICLE, v.crates, v.mass, v.subcat)
   end
   ctld.ensureKitTemplate(c.kits.farp.template)
-  addCrates(c.kits.farp.name, c.kits.farp.template, CTLD_CARGO.Enum.FOB, c.farp.cratesForFarp, c.farp.farpCrateMass, "Construction")
-  addCrates(c.kits.mash.name, c.kits.mash.template, CTLD_CARGO.Enum.FOB, c.mash.crates, c.mash.crateMass, "Construction")
-  addCrates(c.kits.outpost.name, c.kits.outpost.template, CTLD_CARGO.Enum.FOB, c.kits.outpost.crates, c.kits.outpost.mass, "Construction")
-  addCrates(c.kits.uhRepair.name, c.kits.uhRepair.template, CTLD_CARGO.Enum.FOB, c.kits.uhRepair.crates, c.kits.uhRepair.mass, "Construction")
+  addCrates(c.kits.farp.name, c.kits.farp.template, CTLD_CARGO.Enum.FOB, c.farp.cratesForFarp, c.farp.farpCrateMass, "FARP AND MASH")
+  addCrates(c.kits.mash.name, c.kits.mash.template, CTLD_CARGO.Enum.FOB, c.mash.crates, c.mash.crateMass, "FARP AND MASH")
+  addCrates(c.kits.outpost.name, c.kits.outpost.template, CTLD_CARGO.Enum.FOB, c.kits.outpost.crates, c.kits.outpost.mass, "SUPPORT AND SUPPLIES")
+  addCrates(c.kits.uhRepair.name, c.kits.uhRepair.template, CTLD_CARGO.Enum.FOB, c.kits.uhRepair.crates, c.kits.uhRepair.mass, "FARP AND MASH")
   local supply = c.kits.generalSupply
   if supply then
     for _, batch in ipairs(supply.batches) do
-      addCrates(supply.name .. " x" .. batch, supply.template, CTLD_CARGO.Enum.VEHICLE, batch, supply.mass, "Supply")
+      addCrates(supply.name .. " x" .. batch, supply.template, CTLD_CARGO.Enum.VEHICLE, batch, supply.mass, "SUPPORT AND SUPPLIES")
     end
   end
 
@@ -3593,7 +3618,7 @@ function ctld.create()
   end
   if #notes > 0 then
     RH.dcs.message("blue", "Logistics load zones, 150 m, shown in blue for 60 seconds: " .. table.concat(notes, ", ")
-      .. ". FARP crates are under CTLD > Manage crates > Get crates > Construction.", 25)
+      .. ". Vehicle crates are under CTLD > Cargos. FARP crates and general supply come from a logistics center.", 25)
   end
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)
