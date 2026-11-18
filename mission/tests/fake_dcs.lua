@@ -46,6 +46,22 @@ function fake.new()
     return best
   end
 
+  function dcs.staticObjects()
+    local out = {}
+    for name, s in pairs(w.statics) do
+      if s.alive then
+        table.insert(out, {
+          name = name,
+          typeName = s.typeName or "",
+          display = s.display or "",
+          side = s.side,
+          x = s.point.x,
+          y = s.point.y,
+        })
+      end
+    end
+    return out
+  end
   function dcs.staticsInZone(zone, side)
     local out = {}
     for name, s in pairs(w.statics) do
@@ -133,6 +149,9 @@ function fake.new()
   function dcs.illumination(point) table.insert(w.illuminations, point) end
   function dcs.drawCircle(id, side, point, radius, line, fill, text)
     w.drawings[id] = { side = side, point = point, radius = radius, line = line, fill = fill, text = text }
+  end
+  function dcs.drawLabel(id, side, point, text, fontSize)
+    w.drawings[id] = { side = side, point = point, text = text, fontSize = fontSize, kind = "label" }
   end
   function dcs.removeDrawing(id) w.drawings[id] = nil end
   function dcs.message(side, text) table.insert(w.messages, { side = side, text = text }) end

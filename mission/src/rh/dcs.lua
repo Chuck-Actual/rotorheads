@@ -198,6 +198,7 @@ function dcs.staticObjects()
             name = s:getName(),
             typeName = s:getTypeName(),
             display = desc and (desc.displayName or desc.typeName) or "",
+            side = SIDES[side],
             x = p.x,
             y = p.z,
           })
@@ -529,13 +530,13 @@ function dcs.removeDrawing(id)
   dcs.drawIds[id] = nil
 end
 
-function dcs.drawLabel(id, side, point, text)
+function dcs.drawLabel(id, side, point, text, fontSize)
   dcs.removeDrawing(id)
   local sideId = SIDE_IDS[side] or -1
   local textId = dcs.nextDrawId
   dcs.nextDrawId = dcs.nextDrawId + 1
   local spot = util.toVec2(point)
-  trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.45 }, 14, true, text)
+  trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
   dcs.drawIds[id] = { textId }
 end
 

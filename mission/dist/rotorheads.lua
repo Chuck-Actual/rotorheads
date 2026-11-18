@@ -391,7 +391,7 @@ RH.config = {
 
   -- Vehicle crates. `crates` is how many small CDS crates must sit within 50 m before Build works.
   -- `mass` is kg per crate. A Humvee is four crates. A Chinook (6 internal) can lift one in a single trip.
-  -- Testing override. Set this to nil to use each vehicle's own crate count.
+  -- Testing override. Set this to nil to use the crate counts on each vehicle again.
   testVehicleCrates = 1,
   vehicles = {
     { name = "M1045 HMMWV TOW", template = "RH_TPL_BLUE_HMMWV_TOW", crates = 4, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
@@ -810,6 +810,7 @@ function dcs.staticObjects()
             name = s:getName(),
             typeName = s:getTypeName(),
             display = desc and (desc.displayName or desc.typeName) or "",
+            side = SIDES[side],
             x = p.x,
             y = p.z,
           })
@@ -1141,13 +1142,13 @@ function dcs.removeDrawing(id)
   dcs.drawIds[id] = nil
 end
 
-function dcs.drawLabel(id, side, point, text)
+function dcs.drawLabel(id, side, point, text, fontSize)
   dcs.removeDrawing(id)
   local sideId = SIDE_IDS[side] or -1
   local textId = dcs.nextDrawId
   dcs.nextDrawId = dcs.nextDrawId + 1
   local spot = util.toVec2(point)
-  trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.45 }, 14, true, text)
+  trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
   dcs.drawIds[id] = { textId }
 end
 
@@ -1818,6 +1819,8 @@ function logistics.register(name, point, opts)
     -- The mission-editor zone wins over a saved position, so moving the zone moves the FARP.
     existing.x, existing.y = point.x, point.y
     if opts.zoneRadius then existing.zoneRadius = opts.zoneRadius end
+    if opts.editor then existing.editor = true end
+    if opts.label then existing.label = opts.label end
     return existing
   end
   local farp = {
@@ -1826,6 +1829,8 @@ function logistics.register(name, point, opts)
     y = point.y,
     lc = opts.lc or false,
     built = opts.built or false,
+    editor = opts.editor or false,
+    label = opts.label,
     airbase = opts.airbase,
     zoneRadius = opts.zoneRadius,
     pending = opts.pending or false,
@@ -1850,12 +1855,53 @@ function logistics.discoverPlaced()
   logistics.refreshPlacedCenters()
 end
 
+local PAD_NAMES = { "ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT", "GOLF", "HOTEL" }
+
+-- The editor pads are named static1-4 and static1-5. On the map they read FARP ALPHA and FARP BRAVO.
+function logistics.padLabel(name, index)
+  if util.startsWith(name, RH.config.prefixes.farp) then
+    return "FARP " .. name:sub(#RH.config.prefixes.farp + 1):gsub("_", " ")
+  end
+  if util.startsWith(name, "FARP") then return name end
+  return "FARP " .. (PAD_NAMES[index] or tostring(index))
+end
+
+function logistics.editorPads()
+  local pads = {}
+  if not RH.dcs.staticObjects then return pads end
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    local kind = static.typeName or ""
+    if (kind == "FARP" or kind == "Invisible FARP" or kind == "SINGLE_HELIPAD") and static.side ~= "red" then
+      table.insert(pads, static)
+    end
+  end
+  table.sort(pads, function(a, b) return (a.name or "") < (b.name or "") end)
+  return pads
+end
+
+-- A pad with no RH_FARP_ zone still holds crate stock. It is already in the mission, so it is not rebuilt.
+function logistics.discoverEditorPads()
+  for i, pad in ipairs(logistics.editorPads()) do
+    if pad.name and pad.name ~= "" and not logistics.farpAt(pad, 500) then
+      local airfield = logistics.airfieldNear(pad, fcfg().lcAirfieldRadius)
+      local lc = airfield ~= nil and airfield.coalition ~= "red"
+      logistics.register(pad.name, pad, {
+        editor = true,
+        label = logistics.padLabel(pad.name, i),
+        lc = lc,
+        airbase = airfield and airfield.name,
+        crates = lc and -1 or nil,
+      })
+    end
+  end
+end
+
 -- A mission-editor logistics tent on an airfield is that airfield's Logistics Center.
 -- Player-built FARPs are left alone. An existing save is promoted when the tent is close enough.
 function logistics.refreshPlacedCenters()
   local radius = fcfg().placedLcRadius or fcfg().lcAirfieldRadius
   for _, farp in pairs(RH.state.farps) do
-    if not farp.built and not farp.pending then
+    if not farp.built and not farp.pending and not farp.editor then
       local points = { { x = farp.x, y = farp.y } }
       for _, lp in ipairs(farp.loadPoints or {}) do table.insert(points, lp) end
       for _, p in ipairs(points) do
@@ -1920,15 +1966,29 @@ function logistics.crateWorth(name)
   return 1
 end
 
+function logistics.displayName(farp)
+  if type(farp) == "table" and farp.label then return farp.label end
+  local name = type(farp) == "table" and farp.name or farp or ""
+  local prefix = RH.config.prefixes.farp
+  if util.startsWith(name, prefix) then return "FARP " .. name:sub(#prefix + 1):gsub("_", " ") end
+  return name
+end
+
+function logistics.labelPoint(farp)
+  return util.offset(farp, math.pi / 2, 45)
+end
+
+function logistics.mapLabelText(farp)
+  local name = logistics.displayName(farp)
+  if farp.pending then return name .. "\nbuilds on next restart" end
+  local crates = logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
+  return string.format("%s\nCrates: %s", name, crates)
+end
+
 function logistics.refreshMapLabels()
   if not RH.dcs.drawLabel then return end
   for _, farp in ipairs(logistics.farps()) do
-    if farp.pending then
-      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, farp.name .. "\nbuilds on next restart")
-    else
-      local crates = logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
-      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, string.format("%s\nCrates: %s", farp.name, crates))
-    end
+    RH.dcs.drawLabel("farp-stock-" .. farp.name, "all", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18)
   end
 end
 
@@ -2391,6 +2451,7 @@ end
 
 function logistics.start()
   logistics.discoverPlaced()
+  logistics.discoverEditorPads()
   for _, z in ipairs(RH.dcs.zonesWithPrefix(RH.config.prefixes.mash)) do
     logistics.registerMash(z.name, z.point)
   end
@@ -3601,17 +3662,18 @@ end
 local function isLogisticsTent(static)
   local name = string.lower(static.name or "")
   local kind = string.lower((static.typeName or "") .. " " .. (static.display or ""))
-  -- The hospital tent is spawned by us and named "<MASH> tent".
-  if string.sub(name, -5) == " tent" then return false end
+  -- The pad, fuel depot, and ammo dump all contain "farp". Only the tent should own the load circle.
   if string.find(kind, "tent04", 1, true) or string.find(kind, "m92", 1, true) then return false end
-  if string.find(kind, "tent", 1, true) or string.find(kind, "farp", 1, true) then return true end
-  if string.find(name, "tent", 1, true) or string.find(name, "farp", 1, true) then return true end
+  if string.find(name, "mash", 1, true) then return false end
+  if string.find(kind, "farp tent", 1, true) or string.find(kind, "palatka", 1, true) then return true end
+  if string.sub(name, -5) == " tent" then return true end
   return false
 end
 
 -- The 150 m load circle sits on the logistics tent, not on the middle of a large trigger zone.
 function ctld.tentPoints(farp)
-  local search = math.min(math.max(farp.zoneRadius or 0, 2000), 4000)
+  local search = math.max(farp.zoneRadius or 0, RH.config.farp.loadRadius or 150)
+  if search > 600 then search = 600 end
   local tents = {}
   for _, static in ipairs(RH.dcs.staticObjects()) do
     if isLogisticsTent(static) and util.distance(static, farp) <= search then
@@ -3721,6 +3783,7 @@ function ctld.create()
       .. ". Vehicle crates are under CTLD > Cargos. FARP crates and general supply come from a logistics center.", 25)
   end
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
+  if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
   ctld.installHooks(inst)
   ctld.installMenus(inst)
   inst:__Start(2)
@@ -3733,41 +3796,6 @@ function ctld.create()
   return inst
 end
 
--- The crates menu names the stock at the FARP the helicopter is sitting in.
-function ctld.crateStockText(unit)
-  local point = unit and unit.GetVec2 and unit:GetVec2()
-  local farp = point and RH.logistics and RH.logistics.farpAt and RH.logistics.farpAt(point)
-  if not farp then return "FARP crates: not at a FARP" end
-  local count = RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
-  return string.format("%s crates: %s", farp.name, count)
-end
-
-function ctld.attachCrateMenus(inst, unitName)
-  if not UNIT or not UNIT.FindByName or not MENU_GROUP_COMMAND then return end
-  local unit = UNIT:FindByName(unitName)
-  local group = unit and unit.GetGroup and unit:GetGroup()
-  if not group or not group.MyTopCratesMenu then return end
-  local parent = group.MyTopCratesMenu
-  if group.RHCrateStock and group.RHCrateStock.Remove then group.RHCrateStock:Remove() end
-  group.RHCrateStock = MENU_GROUP_COMMAND:New(group, ctld.crateStockText(unit), parent, function()
-    ctld.reply(group, ctld.crateStockText(unit))
-  end)
-  if group.RHReturnCrates and group.RHReturnCrates.Remove then group.RHReturnCrates:Remove() end
-  group.RHReturnCrates = MENU_GROUP_COMMAND:New(group, "Return crates to tent", parent, function()
-    if inst._RemoveCratesNearby then inst:_RemoveCratesNearby(group, unit) end
-  end)
-end
-
-function ctld.installMenus(inst)
-  local refresh = inst._RefreshF10Menus
-  function inst:_RefreshF10Menus()
-    if refresh then refresh(self) end
-    for name in pairs(self.CtldUnits or {}) do
-      ctld.attachCrateMenus(self, name)
-    end
-  end
-end
-
 -- Put a freshly built vehicle 10 m behind the tail, facing the same way as the helicopter.
 function ctld.placeBehind(group, pilot)
   if not group or not pilot or not group:IsAlive() or not pilot:IsAlive() then return end
@@ -3778,6 +3806,57 @@ function ctld.placeBehind(group, pilot)
   group:InitZone(dest)
   group:InitHeading(heading)
   group:Respawn(nil, true)
+end
+
+function ctld.attachReturnCommand(inst, group, unit)
+  if not group or not MENU_GROUP_COMMAND then return end
+  group.RHReturnParents = group.RHReturnParents or {}
+  local parents = {}
+  if group.CTLDTopmenu then table.insert(parents, group.CTLDTopmenu) end
+  if group.MyTopCratesMenu then table.insert(parents, group.MyTopCratesMenu) end
+  for _, parent in ipairs(parents) do
+    if not group.RHReturnParents[parent] then
+      local command = MENU_GROUP_COMMAND:New(group, "Return crates to tent", parent, function()
+        ctld.returnCratesToTent(inst, group, unit)
+      end)
+      if command and command.Refresh then command:Refresh() end
+      group.RHReturnParents[parent] = true
+    end
+  end
+end
+
+function ctld.returnCratesToTent(inst, group, unit)
+  local point = unit and unit.GetVec2 and unit:GetVec2()
+  local farp = point and RH.logistics.farpAt(point, 500)
+  if not farp then
+    ctld.reply(group, "Land within 500 m of a FARP or logistics tent, then return the crates.")
+    return
+  end
+  if not inst or not inst._RemoveCratesNearby then return end
+  local previous = inst.CrateDistance
+  inst.CrateDistance = math.max(previous or 50, RH.config.farp.loadRadius or 150)
+  local ok, err = pcall(inst._RemoveCratesNearby, inst, group, unit)
+  inst.CrateDistance = previous
+  if not ok then util.log("return crates failed: %s", tostring(err)) end
+end
+
+-- Manage Crates already has eight MOOSE entries. The return command also sits on the CTLD
+-- menu itself, and it is added again whenever MOOSE rebuilds that menu.
+function ctld.installMenus(inst)
+  local refresh = inst._RefreshF10Menus
+  if not refresh then return end
+  function inst:_RefreshF10Menus()
+    refresh(self)
+    if not UNIT or not UNIT.FindByName then return end
+    for key, value in pairs(self.CtldUnits or {}) do
+      local unitName = type(value) == "string" and value or key
+      if type(unitName) == "string" then
+        local unit = UNIT:FindByName(unitName)
+        local group = unit and unit.GetGroup and unit:GetGroup()
+        ctld.attachReturnCommand(self, group, unit)
+      end
+    end
+  end
 end
 
 function ctld.installHooks(inst)
@@ -3800,7 +3879,7 @@ function ctld.installHooks(inst)
   end
 
   function inst:OnAfterRemoveCratesNearby(From, Event, To, Group, Unit, Cargotable)
-    local farp = Unit and RH.logistics.farpAt(Unit:GetVec2())
+    local farp = Unit and RH.logistics.farpAt(Unit:GetVec2(), 500)
     if farp and Cargotable then
       local worth = 0
       for _, cargo in pairs(Cargotable) do

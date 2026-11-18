@@ -25,6 +25,8 @@ function logistics.register(name, point, opts)
     -- The mission-editor zone wins over a saved position, so moving the zone moves the FARP.
     existing.x, existing.y = point.x, point.y
     if opts.zoneRadius then existing.zoneRadius = opts.zoneRadius end
+    if opts.editor then existing.editor = true end
+    if opts.label then existing.label = opts.label end
     return existing
   end
   local farp = {
@@ -33,6 +35,8 @@ function logistics.register(name, point, opts)
     y = point.y,
     lc = opts.lc or false,
     built = opts.built or false,
+    editor = opts.editor or false,
+    label = opts.label,
     airbase = opts.airbase,
     zoneRadius = opts.zoneRadius,
     pending = opts.pending or false,
@@ -57,12 +61,53 @@ function logistics.discoverPlaced()
   logistics.refreshPlacedCenters()
 end
 
+local PAD_NAMES = { "ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT", "GOLF", "HOTEL" }
+
+-- The editor pads are named static1-4 and static1-5. On the map they read FARP ALPHA and FARP BRAVO.
+function logistics.padLabel(name, index)
+  if util.startsWith(name, RH.config.prefixes.farp) then
+    return "FARP " .. name:sub(#RH.config.prefixes.farp + 1):gsub("_", " ")
+  end
+  if util.startsWith(name, "FARP") then return name end
+  return "FARP " .. (PAD_NAMES[index] or tostring(index))
+end
+
+function logistics.editorPads()
+  local pads = {}
+  if not RH.dcs.staticObjects then return pads end
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    local kind = static.typeName or ""
+    if (kind == "FARP" or kind == "Invisible FARP" or kind == "SINGLE_HELIPAD") and static.side ~= "red" then
+      table.insert(pads, static)
+    end
+  end
+  table.sort(pads, function(a, b) return (a.name or "") < (b.name or "") end)
+  return pads
+end
+
+-- A pad with no RH_FARP_ zone still holds crate stock. It is already in the mission, so it is not rebuilt.
+function logistics.discoverEditorPads()
+  for i, pad in ipairs(logistics.editorPads()) do
+    if pad.name and pad.name ~= "" and not logistics.farpAt(pad, 500) then
+      local airfield = logistics.airfieldNear(pad, fcfg().lcAirfieldRadius)
+      local lc = airfield ~= nil and airfield.coalition ~= "red"
+      logistics.register(pad.name, pad, {
+        editor = true,
+        label = logistics.padLabel(pad.name, i),
+        lc = lc,
+        airbase = airfield and airfield.name,
+        crates = lc and -1 or nil,
+      })
+    end
+  end
+end
+
 -- A mission-editor logistics tent on an airfield is that airfield's Logistics Center.
 -- Player-built FARPs are left alone. An existing save is promoted when the tent is close enough.
 function logistics.refreshPlacedCenters()
   local radius = fcfg().placedLcRadius or fcfg().lcAirfieldRadius
   for _, farp in pairs(RH.state.farps) do
-    if not farp.built and not farp.pending then
+    if not farp.built and not farp.pending and not farp.editor then
       local points = { { x = farp.x, y = farp.y } }
       for _, lp in ipairs(farp.loadPoints or {}) do table.insert(points, lp) end
       for _, p in ipairs(points) do
@@ -127,15 +172,29 @@ function logistics.crateWorth(name)
   return 1
 end
 
+function logistics.displayName(farp)
+  if type(farp) == "table" and farp.label then return farp.label end
+  local name = type(farp) == "table" and farp.name or farp or ""
+  local prefix = RH.config.prefixes.farp
+  if util.startsWith(name, prefix) then return "FARP " .. name:sub(#prefix + 1):gsub("_", " ") end
+  return name
+end
+
+function logistics.labelPoint(farp)
+  return util.offset(farp, math.pi / 2, 45)
+end
+
+function logistics.mapLabelText(farp)
+  local name = logistics.displayName(farp)
+  if farp.pending then return name .. "\nbuilds on next restart" end
+  local crates = logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
+  return string.format("%s\nCrates: %s", name, crates)
+end
+
 function logistics.refreshMapLabels()
   if not RH.dcs.drawLabel then return end
   for _, farp in ipairs(logistics.farps()) do
-    if farp.pending then
-      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, farp.name .. "\nbuilds on next restart")
-    else
-      local crates = logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
-      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, string.format("%s\nCrates: %s", farp.name, crates))
-    end
+    RH.dcs.drawLabel("farp-stock-" .. farp.name, "all", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18)
   end
 end
 
@@ -598,6 +657,7 @@ end
 
 function logistics.start()
   logistics.discoverPlaced()
+  logistics.discoverEditorPads()
   for _, z in ipairs(RH.dcs.zonesWithPrefix(RH.config.prefixes.mash)) do
     logistics.registerMash(z.name, z.point)
   end

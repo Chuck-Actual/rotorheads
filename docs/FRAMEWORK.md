@@ -40,9 +40,7 @@ Agents read this before editing. When you change a mechanic, update that mechani
 
 `ctld.lua` builds the MOOSE CTLD menu from `config.lua` `troops`, `vehicles`, and `kits`. Every buildable group is a late-activated mission group named `RH_TPL_BLUE_*`. If a kit template is missing, `ctld.ensureKitTemplate` copies `RH_TPL_BLUE_HMMWV_TOW` so the crate still appears. Built vehicles are moved behind the helicopter by `ctld.placeBehind`.
 
-Vehicle crates use `config.testVehicleCrates`, which is `1`, so each vehicle builds from one crate. Set that value to nil to use the `crates` count on each vehicle. FARP, MASH, outpost, and supply kits keep their own counts.
-
-The crates menu shows the stock of the FARP under the helicopter (`ctld.crateStockText`) and `Return crates to tent`. That command calls CTLD remove-nearby. `OnAfterRemoveCratesNearby` adds the crate worth back onto that FARP, up to `farp.maxCrates`.
+`config.testVehicleCrates` is `1` while ground units are being tested. The real count stays on each vehicle. Set the override to `nil` to use those counts again. Logistics Centers and ships have unlimited crates. General supply is loaded only there. After the crates are dropped at a FARP, F10 > CTLD > **Return crates to tent** (also under Manage Crates) deletes them and adds them to that FARP. A general-supply crate is worth 5. Those crates can then be drawn back out at the FARP tent as ground-unit crates.
 
 Not in this build, and not to be assumed: an "all crates or one crate" menu, a flattened troop menu, or joining NASAMS and Roland pieces into one group.
 
@@ -51,6 +49,8 @@ Not in this build, and not to be assumed: an "all crates or one crate" menu, a f
 Player FARPs are marked in the mission and spawned on a later start by `logistics.spawnBuilt` through `SPAWNSTATIC:InitFARP` (dynamic spawn on, hot start off). `RH_FARP_Bassel` in the current save is the logistics center at the tent, and it is not built.
 
 The editor pads are separate. On the first start after this change, `logistics.syncPads` gives each pad named with type `FARP` 10 tons of jet fuel (`setLiquidAmount(0, 10000)`) and 40 of `weapons.missiles.AGM_114K`, `weapons.missiles.AGM_114L`, and `weapons.missiles.Vikhr_M`. The grant is stored on `RH.state.padStock[name]` with `granted = true`. Later starts write those saved numbers back. They do not add another 10 tons or another 40. Capture waits 25 seconds so the startup save cannot record an empty warehouse over the grant.
+
+`logistics.discoverEditorPads` also gives each of those pads a crate stock, without rebuilding the pad. `static1-4` is drawn as **FARP ALPHA** and `static1-5` as **FARP BRAVO**. The label sits just east of the pad, white on a dark box, for every coalition: the name, then `Crates: N`. A new pad starts at 0. `RH_FARP_Bassel` stays the logistics center and reads `Crates: unlimited`.
 
 ### MASH and CSAR
 

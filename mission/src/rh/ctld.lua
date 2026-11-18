@@ -77,17 +77,18 @@ end
 local function isLogisticsTent(static)
   local name = string.lower(static.name or "")
   local kind = string.lower((static.typeName or "") .. " " .. (static.display or ""))
-  -- The hospital tent is spawned by us and named "<MASH> tent".
-  if string.sub(name, -5) == " tent" then return false end
+  -- The pad, fuel depot, and ammo dump all contain "farp". Only the tent should own the load circle.
   if string.find(kind, "tent04", 1, true) or string.find(kind, "m92", 1, true) then return false end
-  if string.find(kind, "tent", 1, true) or string.find(kind, "farp", 1, true) then return true end
-  if string.find(name, "tent", 1, true) or string.find(name, "farp", 1, true) then return true end
+  if string.find(name, "mash", 1, true) then return false end
+  if string.find(kind, "farp tent", 1, true) or string.find(kind, "palatka", 1, true) then return true end
+  if string.sub(name, -5) == " tent" then return true end
   return false
 end
 
 -- The 150 m load circle sits on the logistics tent, not on the middle of a large trigger zone.
 function ctld.tentPoints(farp)
-  local search = math.min(math.max(farp.zoneRadius or 0, 2000), 4000)
+  local search = math.max(farp.zoneRadius or 0, RH.config.farp.loadRadius or 150)
+  if search > 600 then search = 600 end
   local tents = {}
   for _, static in ipairs(RH.dcs.staticObjects()) do
     if isLogisticsTent(static) and util.distance(static, farp) <= search then
@@ -197,6 +198,7 @@ function ctld.create()
       .. ". Vehicle crates are under CTLD > Cargos. FARP crates and general supply come from a logistics center.", 25)
   end
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
+  if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
   ctld.installHooks(inst)
   ctld.installMenus(inst)
   inst:__Start(2)
@@ -209,41 +211,6 @@ function ctld.create()
   return inst
 end
 
--- The crates menu names the stock at the FARP the helicopter is sitting in.
-function ctld.crateStockText(unit)
-  local point = unit and unit.GetVec2 and unit:GetVec2()
-  local farp = point and RH.logistics and RH.logistics.farpAt and RH.logistics.farpAt(point)
-  if not farp then return "FARP crates: not at a FARP" end
-  local count = RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
-  return string.format("%s crates: %s", farp.name, count)
-end
-
-function ctld.attachCrateMenus(inst, unitName)
-  if not UNIT or not UNIT.FindByName or not MENU_GROUP_COMMAND then return end
-  local unit = UNIT:FindByName(unitName)
-  local group = unit and unit.GetGroup and unit:GetGroup()
-  if not group or not group.MyTopCratesMenu then return end
-  local parent = group.MyTopCratesMenu
-  if group.RHCrateStock and group.RHCrateStock.Remove then group.RHCrateStock:Remove() end
-  group.RHCrateStock = MENU_GROUP_COMMAND:New(group, ctld.crateStockText(unit), parent, function()
-    ctld.reply(group, ctld.crateStockText(unit))
-  end)
-  if group.RHReturnCrates and group.RHReturnCrates.Remove then group.RHReturnCrates:Remove() end
-  group.RHReturnCrates = MENU_GROUP_COMMAND:New(group, "Return crates to tent", parent, function()
-    if inst._RemoveCratesNearby then inst:_RemoveCratesNearby(group, unit) end
-  end)
-end
-
-function ctld.installMenus(inst)
-  local refresh = inst._RefreshF10Menus
-  function inst:_RefreshF10Menus()
-    if refresh then refresh(self) end
-    for name in pairs(self.CtldUnits or {}) do
-      ctld.attachCrateMenus(self, name)
-    end
-  end
-end
-
 -- Put a freshly built vehicle 10 m behind the tail, facing the same way as the helicopter.
 function ctld.placeBehind(group, pilot)
   if not group or not pilot or not group:IsAlive() or not pilot:IsAlive() then return end
@@ -254,6 +221,57 @@ function ctld.placeBehind(group, pilot)
   group:InitZone(dest)
   group:InitHeading(heading)
   group:Respawn(nil, true)
+end
+
+function ctld.attachReturnCommand(inst, group, unit)
+  if not group or not MENU_GROUP_COMMAND then return end
+  group.RHReturnParents = group.RHReturnParents or {}
+  local parents = {}
+  if group.CTLDTopmenu then table.insert(parents, group.CTLDTopmenu) end
+  if group.MyTopCratesMenu then table.insert(parents, group.MyTopCratesMenu) end
+  for _, parent in ipairs(parents) do
+    if not group.RHReturnParents[parent] then
+      local command = MENU_GROUP_COMMAND:New(group, "Return crates to tent", parent, function()
+        ctld.returnCratesToTent(inst, group, unit)
+      end)
+      if command and command.Refresh then command:Refresh() end
+      group.RHReturnParents[parent] = true
+    end
+  end
+end
+
+function ctld.returnCratesToTent(inst, group, unit)
+  local point = unit and unit.GetVec2 and unit:GetVec2()
+  local farp = point and RH.logistics.farpAt(point, 500)
+  if not farp then
+    ctld.reply(group, "Land within 500 m of a FARP or logistics tent, then return the crates.")
+    return
+  end
+  if not inst or not inst._RemoveCratesNearby then return end
+  local previous = inst.CrateDistance
+  inst.CrateDistance = math.max(previous or 50, RH.config.farp.loadRadius or 150)
+  local ok, err = pcall(inst._RemoveCratesNearby, inst, group, unit)
+  inst.CrateDistance = previous
+  if not ok then util.log("return crates failed: %s", tostring(err)) end
+end
+
+-- Manage Crates already has eight MOOSE entries. The return command also sits on the CTLD
+-- menu itself, and it is added again whenever MOOSE rebuilds that menu.
+function ctld.installMenus(inst)
+  local refresh = inst._RefreshF10Menus
+  if not refresh then return end
+  function inst:_RefreshF10Menus()
+    refresh(self)
+    if not UNIT or not UNIT.FindByName then return end
+    for key, value in pairs(self.CtldUnits or {}) do
+      local unitName = type(value) == "string" and value or key
+      if type(unitName) == "string" then
+        local unit = UNIT:FindByName(unitName)
+        local group = unit and unit.GetGroup and unit:GetGroup()
+        ctld.attachReturnCommand(self, group, unit)
+      end
+    end
+  end
 end
 
 function ctld.installHooks(inst)
@@ -276,7 +294,7 @@ function ctld.installHooks(inst)
   end
 
   function inst:OnAfterRemoveCratesNearby(From, Event, To, Group, Unit, Cargotable)
-    local farp = Unit and RH.logistics.farpAt(Unit:GetVec2())
+    local farp = Unit and RH.logistics.farpAt(Unit:GetVec2(), 500)
     if farp and Cargotable then
       local worth = 0
       for _, cargo in pairs(Cargotable) do

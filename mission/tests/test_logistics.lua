@@ -59,6 +59,82 @@ T.test("Logistics Centers have unlimited crates", function()
   T.ok(RH.logistics.takeCrates(lc, 100000))
 end)
 
+T.test("editor pads are labeled FARP ALPHA and FARP BRAVO with a crate count", function()
+  local w = setup()
+  w.statics["static1-4"] = { alive = true, point = { x = 40763, y = 9580 }, typeName = "FARP" }
+  w.statics["static1-5"] = { alive = true, point = { x = 46469, y = 6473 }, typeName = "FARP" }
+  RH.logistics.discoverEditorPads()
+  local bravo
+  for _, farp in pairs(RH.state.farps) do
+    if farp.label == "FARP BRAVO" then bravo = farp end
+  end
+  T.eq(bravo.name, "static1-5")
+  T.eq(bravo.crates, 0)
+  T.eq(bravo.built, false)
+  T.eq(RH.logistics.mapLabelText(bravo), "FARP BRAVO\nCrates: 0")
+  RH.logistics.refreshMapLabels()
+  local label = w.drawings["farp-stock-static1-5"]
+  T.eq(label.text, "FARP BRAVO\nCrates: 0")
+  T.eq(label.side, "all")
+  T.eq(label.fontSize, 18)
+  RH.logistics.spawnBuilt()
+  for _, name in ipairs(w.farpsSpawned) do T.ok(name ~= "static1-4" and name ~= "static1-5") end
+end)
+
+T.test("the load circle sits on the FARP tent, not the pad", function()
+  local w = setup()
+  dofile("src/rh/ctld.lua")
+  local farp = RH.state.farps.RH_FARP_ALPHA
+  w.statics.pad = { alive = true, point = { x = farp.x, y = farp.y }, typeName = "FARP" }
+  w.statics.fuel = { alive = true, point = { x = farp.x + 70, y = farp.y }, typeName = "FARP Fuel Depot" }
+  w.statics.tent = { alive = true, point = { x = farp.x, y = farp.y - 70 }, typeName = "FARP Tent" }
+  local points, atTent = RH.ctld.tentPoints(farp)
+  T.eq(atTent, true)
+  T.eq(#points, 1)
+  T.eq(points[1].y, farp.y - 70)
+end)
+
+T.test("Return crates to tent is on the CTLD menu", function()
+  T.fresh()
+  dofile("src/rh/ctld.lua")
+  T.eq(RH.config.testVehicleCrates, 1)
+  local added = {}
+  MENU_GROUP_COMMAND = { New = function(_, _, label, parent)
+    table.insert(added, { label = label, parent = parent })
+    return { Refresh = function() end }
+  end }
+  local group = {}
+  local unit = { GetGroup = function() return group end, GetVec2 = function() return { x = 10, y = 10 } end }
+  UNIT = { FindByName = function(_, name) if name == "Heli-1" then return unit end end }
+  local inst = { CtldUnits = { ["Heli-1"] = "Heli-1" }, CrateDistance = 50 }
+  function inst:_RefreshF10Menus()
+    group.CTLDTopmenu = group.CTLDTopmenu or { name = "top" }
+    group.MyTopCratesMenu = group.MyTopCratesMenu or { name = "crates" }
+  end
+  local removed = 0
+  function inst:_RemoveCratesNearby()
+    removed = removed + 1
+    T.eq(inst.CrateDistance, RH.config.farp.loadRadius)
+  end
+  RH.ctld.installMenus(inst)
+  inst:_RefreshF10Menus()
+  inst:_RefreshF10Menus()
+  T.eq(#added, 2)
+  T.eq(added[1].label, "Return crates to tent")
+  T.eq(added[1].parent.name, "top")
+  T.eq(added[2].parent.name, "crates")
+  RH.ctld.instance = { _SendMessage = function() end }
+  RH.ctld.returnCratesToTent(inst, group, unit)
+  T.eq(removed, 0)
+  RH.logistics.register("static1-5", { x = 10, y = 10 }, { editor = true, label = "FARP BRAVO" })
+  RH.ctld.returnCratesToTent(inst, group, unit)
+  T.eq(removed, 1)
+  T.eq(inst.CrateDistance, 50)
+  MENU_GROUP_COMMAND = nil
+  UNIT = nil
+  RH.ctld.instance = nil
+end)
+
 T.test("FARP must be 1 mile from other FARPs and Logistics Centers", function()
   setup()
   local mile = RH.config.farp.minSeparation
@@ -191,44 +267,6 @@ T.test("MASH capacity and transport tasks", function()
   T.eq(RH.logistics.startTransport("herc", "MASH 01", 30), 30)
   T.eq(RH.state.mashes["MASH 01"].patients, 5)
   T.eq(RH.logistics.completeTransport("herc"), 30)
-end)
-
-T.test("the crates menu shows the FARP count and returns crates to the tent", function()
-  setup()
-  local farp = RH.state.farps.RH_FARP_ALPHA
-  farp.crates = 17
-  dofile("src/rh/ctld.lua")
-  local group = { MyTopCratesMenu = {} }
-  local unit = {
-    GetVec2 = function() return { x = 40000, y = 0 } end,
-    GetGroup = function() return group end,
-  }
-  T.eq(RH.ctld.crateStockText(unit), "RH_FARP_ALPHA crates: 17")
-  T.eq(RH.ctld.crateStockText(nil), "FARP crates: not at a FARP")
-  local added = {}
-  MENU_GROUP_COMMAND = {
-    New = function(_, group, text, parent, fn)
-      local item = { group = group, text = text, parent = parent, fn = fn, Remove = function() end }
-      added[#added + 1] = item
-      return item
-    end,
-  }
-  UNIT = { FindByName = function() return unit end }
-  local removed = false
-  local inst = {
-    CtldUnits = { heli = true },
-    _RefreshF10Menus = function() end,
-    _RemoveCratesNearby = function() removed = true end,
-  }
-  RH.ctld.installMenus(inst)
-  inst:_RefreshF10Menus()
-  T.eq(added[1].text, "RH_FARP_ALPHA crates: 17")
-  T.eq(added[1].parent, group.MyTopCratesMenu)
-  T.eq(added[2].text, "Return crates to tent")
-  added[2].fn()
-  T.ok(removed)
-  MENU_GROUP_COMMAND = nil
-  UNIT = nil
 end)
 
 T.test("FARP crate template is copied from the Humvee so Get crates can list it", function()
