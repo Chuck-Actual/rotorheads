@@ -52,6 +52,8 @@ The editor pads are separate. On the first start after this change, `logistics.s
 
 `logistics.discoverEditorPads` also gives each of those pads a crate stock, without rebuilding the pad. `static1-4` is drawn as **FARP ALPHA** and `static1-5` as **FARP BRAVO**. The label sits just east of the pad, white on a dark box, for every coalition: the name, then `Crates: N`. A new pad starts at 0. `RH_FARP_Bassel` stays the logistics center and reads `Crates: unlimited`.
 
+A script-built FARP that lands within 400 m of an editor pad or tent is a duplicate. `logistics.dropStackedFarps` deletes that copy, including `FARP 01` and its tent, depots, and Humvee, and the editor pad keeps the crate count. A marked FARP in an empty field is still spawned.
+
 ### MASH and CSAR
 
 MASH separation is 16 km. A MASH zone in the editor is registered, and the tent is spawned beside it. CSAR uses `RH_TPL_DOWNED_PILOT` and the MOOSE CSAR module. Drop-off is at the MASH.

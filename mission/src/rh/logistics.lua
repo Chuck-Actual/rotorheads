@@ -288,6 +288,67 @@ function logistics.farpNear(point, radius)
   return best
 end
 
+function logistics.pieceNames(farpName)
+  local names = { [farpName] = true }
+  for _, piece in ipairs(fcfg().services or {}) do
+    names[farpName .. " " .. piece.label] = true
+  end
+  return names
+end
+
+-- A pad or tent already in the mission, ignoring pieces this farp would spawn itself.
+function logistics.editorSiteAt(point, ignoreNames, radius)
+  radius = radius or 400
+  ignoreNames = ignoreNames or {}
+  if not RH.dcs.staticObjects then return nil end
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    if not ignoreNames[static.name or ""] then
+      local kind = static.typeName or ""
+      local display = string.lower(kind .. " " .. (static.display or ""))
+      local pad = kind == "FARP" or kind == "Invisible FARP" or kind == "SINGLE_HELIPAD"
+      local tent = string.find(display, "farp tent", 1, true) or string.find(display, "palatka", 1, true)
+      if (pad or tent) and static.side ~= "red" and util.distance(static, point) <= radius then
+        return static
+      end
+    end
+  end
+end
+
+-- FARP 01 was marked on top of the editor FARP, then spawned again at the next start.
+-- Drop that copy. The editor pad keeps the crate count.
+function logistics.dropStackedFarps()
+  local dropped = {}
+  for name, farp in pairs(RH.state.farps) do
+    if (farp.pending or farp.built) and not farp.lc and not farp.editor then
+      if logistics.editorSiteAt(farp, logistics.pieceNames(name), 400) then
+        dropped[#dropped + 1] = name
+      end
+    end
+  end
+  table.sort(dropped)
+  for _, name in ipairs(dropped) do
+    local pieces = logistics.pieceNames(name)
+    RH.state.farps[name] = nil
+    local saved = RH.state.world
+    if saved and saved.objects then
+      local kept = {}
+      for _, obj in ipairs(saved.objects) do
+        if not pieces[obj.name] then kept[#kept + 1] = obj end
+      end
+      saved.objects = kept
+    end
+    if RH.dcs.destroyNamed then
+      for pieceName in pairs(pieces) do RH.dcs.destroyNamed(pieceName) end
+    end
+    if RH.dcs.removeDrawing then
+      RH.dcs.removeDrawing("farp-stock-" .. name)
+      RH.dcs.removeDrawing("pending-" .. name)
+    end
+  end
+  if #dropped > 0 and RH.persistence and RH.persistence.save then RH.persistence.save() end
+  return dropped
+end
+
 function logistics.spawnBuilt()
   logistics.sessionSpawned = {}
   local marked = {}
@@ -657,6 +718,7 @@ end
 
 function logistics.start()
   logistics.discoverPlaced()
+  logistics.dropStackedFarps()
   logistics.discoverEditorPads()
   for _, z in ipairs(RH.dcs.zonesWithPrefix(RH.config.prefixes.mash)) do
     logistics.registerMash(z.name, z.point)

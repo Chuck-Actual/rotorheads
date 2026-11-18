@@ -264,6 +264,32 @@ T.test("a FARP brings the services DCS needs to rearm and refuel", function()
   T.ok(not types["M 818"])
 end)
 
+T.test("a built FARP stacked on an editor pad is dropped and the pad shows the crate count", function()
+  local w = setup()
+  w.statics["static1-4"] = { alive = true, point = { x = 80000, y = 0 }, typeName = "FARP" }
+  w.statics.tent = { alive = true, point = { x = 80000, y = -70 }, typeName = "FARP Tent" }
+  RH.logistics.register("FARP 01", { x = 80020, y = -10 }, { built = true })
+  RH.logistics.register("FARP 02", { x = 120000, y = 0 }, { pending = true })
+  RH.state.world = { objects = { { name = "FARP 01" }, { name = "FARP 01 Tent" }, { name = "Humvee" } } }
+  local dropped = RH.logistics.dropStackedFarps()
+  T.eq(#dropped, 1)
+  T.eq(dropped[1], "FARP 01")
+  T.eq(RH.state.farps["FARP 01"], nil)
+  T.eq(RH.state.farps["FARP 02"].pending, true)
+  T.eq(#RH.state.world.objects, 1)
+  T.eq(RH.state.world.objects[1].name, "Humvee")
+  RH.logistics.discoverEditorPads()
+  local labeled
+  for _, farp in pairs(RH.state.farps) do
+    if farp.name == "static1-4" then labeled = farp end
+  end
+  T.eq(labeled.editor, true)
+  T.eq(RH.logistics.mapLabelText(labeled), "FARP ALPHA\nCrates: 0")
+  RH.logistics.spawnBuilt()
+  T.eq(#w.farpsSpawned, 1)
+  T.eq(w.farpsSpawned[1], "FARP 02")
+end)
+
 T.test("a marked FARP waits for the next restart and then spawns empty", function()
   local w = setup()
   local mile = RH.config.farp.minSeparation
