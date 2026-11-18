@@ -135,6 +135,48 @@ T.test("Return crates to tent is on the CTLD menu", function()
   RH.ctld.instance = nil
 end)
 
+T.test("return crates at the tent finds a FARP whose pad is more than 500 m away", function()
+  local w = setup()
+  dofile("src/rh/ctld.lua")
+  local farp = RH.state.farps.RH_FARP_ALPHA
+  w.statics.tent = { alive = true, point = { x = farp.x, y = farp.y + 700 }, typeName = "FARP Tent", name = "RH_FARP_ALPHA Tent" }
+  local removed = 0
+  local inst = { CrateDistance = 50, _RemoveCratesNearby = function() removed = removed + 1 end }
+  RH.ctld.instance = { _SendMessage = function() end }
+  local unit = { IsAlive = function() return true end, GetVec2 = function() return { x = farp.x + 15, y = farp.y + 700 } end }
+  RH.ctld.returnCratesToTent(inst, nil, unit)
+  T.eq(removed, 1)
+  T.eq(inst.CrateDistance, 50)
+  RH.ctld.instance = nil
+end)
+
+T.test("general supply cannot be built into a FARP", function()
+  setup()
+  dofile("src/rh/ctld.lua")
+  T.ok(RH.config.kits.generalSupply.template ~= RH.config.kits.farp.template)
+  local inst = {}
+  local messages = {}
+  RH.ctld.instance = { _SendMessage = function(_, text) table.insert(messages, text) end }
+  RH.ctld.installHooks(inst)
+  local before = 0
+  for _ in pairs(RH.state.farps) do before = before + 1 end
+  T.eq(inst:OnBeforeCratesBuild(nil, nil, nil, {}, nil, "General supply x5"), false)
+  local unit = { GetVec2 = function() return { x = 90000, y = 0 } end, GetPlayerName = function() return "Pilot" end, IsAlive = function() return true end }
+  inst:OnAfterCratesBuildStarted(nil, nil, nil, {}, unit, "General supply x5")
+  local destroyed = false
+  inst:OnAfterCratesBuild(nil, nil, nil, {}, unit, {
+    GetName = function() return "RH_TPL_BLUE_SUPPLY-1" end,
+    Destroy = function() destroyed = true end,
+    GetVec2 = function() return { x = 90000, y = 0 } end,
+  })
+  local after = 0
+  for _ in pairs(RH.state.farps) do after = after + 1 end
+  T.eq(after, before)
+  T.eq(destroyed, true)
+  T.ok(#messages > 0)
+  RH.ctld.instance = nil
+end)
+
 T.test("FARP must be 1 mile from other FARPs and Logistics Centers", function()
   setup()
   local mile = RH.config.farp.minSeparation

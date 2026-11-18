@@ -170,6 +170,7 @@ function ctld.create()
     addCrates(v.name, v.template, CTLD_CARGO.Enum.VEHICLE, crates, v.mass, v.subcat)
   end
   ctld.ensureKitTemplate(c.kits.farp.template)
+  if c.kits.generalSupply then ctld.ensureKitTemplate(c.kits.generalSupply.template) end
   addCrates(c.kits.farp.name, c.kits.farp.template, CTLD_CARGO.Enum.FOB, c.farp.cratesForFarp, c.farp.farpCrateMass, "FARP AND MASH")
   addCrates(c.kits.mash.name, c.kits.mash.template, CTLD_CARGO.Enum.FOB, c.mash.crates, c.mash.crateMass, "FARP AND MASH")
   addCrates(c.kits.outpost.name, c.kits.outpost.template, CTLD_CARGO.Enum.FOB, c.kits.outpost.crates, c.kits.outpost.mass, "SUPPORT AND SUPPLIES")
@@ -240,11 +241,68 @@ function ctld.attachReturnCommand(inst, group, unit)
   end
 end
 
+function ctld.liveUnit(group, fallback)
+  local function alive(u)
+    if not u or not u.GetVec2 then return nil end
+    if u.IsAlive and not u:IsAlive() then return nil end
+    local point = u:GetVec2()
+    if point and point.x then return u end
+  end
+  if group and group.GetUnits then
+    local units = group:GetUnits() or {}
+    for _, u in pairs(units) do
+      if u and u.GetPlayerName and u:GetPlayerName() and alive(u) then return u end
+    end
+    for _, u in pairs(units) do
+      if alive(u) then return u end
+    end
+  end
+  return alive(fallback)
+end
+
+function ctld.nearestTent(point, radius)
+  local best, bestDist
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    if isLogisticsTent(static) then
+      local d = util.distance(static, point)
+      if d <= radius and (not bestDist or d < bestDist) then best, bestDist = static, d end
+    end
+  end
+  return best
+end
+
+-- The helicopter parks at the tent. The saved FARP point can be the pad or the zone center,
+-- which is far enough away that a 500 m check from the helicopter misses.
+function ctld.farpForReturn(point)
+  local reach = RH.config.farp.loadRadius or 150
+  local tent = ctld.nearestTent(point, reach)
+  local farp = RH.logistics.farpAt(tent or point, tent and 1000 or 500)
+  if farp or not tent then return farp, tent end
+  local pad, padDist
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    local kind = static.typeName or ""
+    if (kind == "FARP" or kind == "Invisible FARP" or kind == "SINGLE_HELIPAD") and static.side ~= "red" then
+      local d = util.distance(static, tent)
+      if d <= 400 and (not padDist or d < padDist) then pad, padDist = static, d end
+    end
+  end
+  local spot = pad or tent
+  local name = (pad and pad.name and pad.name ~= "" and pad.name) or (tent.name ~= "" and tent.name) or "FARP"
+  if RH.state.farps[name] then return RH.state.farps[name], tent end
+  local index = 0
+  for _ in pairs(RH.state.farps) do index = index + 1 end
+  return RH.logistics.register(name, spot, {
+    editor = true,
+    label = RH.logistics.padLabel(name, index + 1),
+  }), tent
+end
+
 function ctld.returnCratesToTent(inst, group, unit)
+  unit = ctld.liveUnit(group, unit) or unit
   local point = unit and unit.GetVec2 and unit:GetVec2()
-  local farp = point and RH.logistics.farpAt(point, 500)
+  local farp = point and ctld.farpForReturn(point)
   if not farp then
-    ctld.reply(group, "Land within 500 m of a FARP or logistics tent, then return the crates.")
+    ctld.reply(group, "Park within 150 m of the FARP tent, then return the crates.")
     return
   end
   if not inst or not inst._RemoveCratesNearby then return end
@@ -320,13 +378,15 @@ function ctld.installHooks(inst)
   function inst:OnBeforeCratesBuild(From, Event, To, Group, Unit, cargoName)
     if type(cargoName) == "table" and cargoName.GetName then cargoName = cargoName:GetName() end
     if RH.logistics.isGeneralSupply(cargoName) then
-      ctld.reply(Group, "General supply crates are not built. Land at a FARP tent and use Return crates. Each one adds 5 to that FARP.")
+      ctld.reply(Group, "General supply is not a FARP. Drop it at a FARP tent and use Return crates to tent. Each crate adds 5.")
       return false
     end
     return true
   end
 
   function inst:OnAfterCratesBuildStarted(From, Event, To, Group, Unit, cargoName)
+    if type(cargoName) == "table" and cargoName.GetName then cargoName = cargoName:GetName() end
+    if RH.logistics.isGeneralSupply(cargoName) then return end
     if cargoName ~= RH.config.kits.farp.name then return end
     local point = ctld.buildPoint(Unit) or (Unit and Unit.GetVec2 and Unit:GetVec2())
     if not point then return end
@@ -338,6 +398,11 @@ function ctld.installHooks(inst)
   function inst:OnAfterCratesBuild(From, Event, To, Group, Unit, Vehicle)
     if not Group or not Vehicle then return end
     local kit = templateKit(Vehicle:GetName())
+    if kit == "generalSupply" or RH.logistics.isGeneralSupply(Vehicle:GetName()) then
+      Vehicle:Destroy(false)
+      ctld.reply(Group, "General supply is not a FARP. Use Return crates to tent. Each crate adds 5 to that FARP.")
+      return
+    end
     if not kit then
       ctld.placeBehind(Vehicle, Unit)
       return
