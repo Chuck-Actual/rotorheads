@@ -110,6 +110,11 @@ RH.config = {
     -- Crates and troops load within this distance of the logistics tent.
     loadRadius = 150,
     displayCirclesFor = 60,
+    -- New FARPs take one of these. A name stays taken until that FARP is decommissioned.
+    names = {
+      "COPPERHEAD", "RATTLESNAKE", "MUSTANG", "LONGBOW", "DAGGER",
+      "OUTLAW", "WARHORSE", "SWITCHBLADE", "IRONCLAD", "GHOST",
+    },
     -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
     airframes = 999,
     -- On the shelf for every helicopter: guns, rounds, rockets, pylons, pods, and air-to-air missiles.

@@ -59,24 +59,30 @@ T.test("Logistics Centers have unlimited crates", function()
   T.ok(RH.logistics.takeCrates(lc, 100000))
 end)
 
-T.test("editor pads are labeled FARP ALPHA and FARP BRAVO with a crate count", function()
+T.test("editor pads take two different bank names and keep a crate count", function()
   local w = setup()
+  local random = math.random
+  math.random = function() return 1 end
   w.statics["static1-4"] = { alive = true, point = { x = 40763, y = 9580 }, typeName = "FARP" }
   w.statics["static1-5"] = { alive = true, point = { x = 46469, y = 6473 }, typeName = "FARP" }
   RH.logistics.discoverEditorPads()
-  local bravo
-  for _, farp in pairs(RH.state.farps) do
-    if farp.label == "FARP BRAVO" then bravo = farp end
-  end
-  T.eq(bravo.name, "static1-5")
-  T.eq(bravo.crates, 0)
-  T.eq(bravo.built, false)
-  T.eq(RH.logistics.mapLabelText(bravo), "FARP BRAVO\nCrates: 0")
+  math.random = random
+  local first = RH.state.farps["static1-4"]
+  local second = RH.state.farps["static1-5"]
+  T.eq(first.label, "FARP COPPERHEAD")
+  T.eq(second.label, "FARP RATTLESNAKE")
+  T.eq(second.crates, 0)
+  T.eq(RH.logistics.mapLabelText(second), "FARP RATTLESNAKE\nCrates: 0")
   RH.logistics.refreshMapLabels()
   local label = w.drawings["farp-stock-static1-5"]
-  T.eq(label.text, "FARP BRAVO\nCrates: 0")
+  T.eq(label.text, "FARP RATTLESNAKE\nCrates: 0")
   T.eq(label.side, "all")
   T.eq(label.fontSize, 18)
+  T.eq(label.markId, second.stockMark)
+  RH.state.farps["static1-4"] = nil
+  math.random = function() return 1 end
+  T.eq(RH.logistics.pickFarpName(), "FARP COPPERHEAD")
+  math.random = random
   RH.logistics.spawnBuilt()
   for _, name in ipairs(w.farpsSpawned) do T.ok(name ~= "static1-4" and name ~= "static1-5") end
 end)
@@ -169,10 +175,12 @@ T.test("Return crates to tent is on the CTLD menu", function()
   RH.ctld.installMenus(inst)
   inst:_RefreshF10Menus()
   inst:_RefreshF10Menus()
-  T.eq(#added, 2)
-  T.eq(added[1].label, "Return crates to tent")
+  T.eq(#added, 4)
+  T.eq(added[1].label, "Show logistics zones")
   T.eq(added[1].parent.name, "top")
-  T.eq(added[2].parent.name, "crates")
+  T.eq(added[2].label, "Return crates to tent")
+  T.eq(added[3].parent.name, "crates")
+  T.eq(added[4].label, "Return crates to tent")
   RH.ctld.instance = { _SendMessage = function() end }
   RH.ctld.returnCratesToTent(inst, group, unit)
   T.eq(removed, 0)
@@ -183,6 +191,72 @@ T.test("Return crates to tent is on the CTLD menu", function()
   MENU_GROUP_COMMAND = nil
   UNIT = nil
   RH.ctld.instance = nil
+end)
+
+T.test("show logistics zones draws a circle and leaves the crate count", function()
+  local w = setup()
+  dofile("src/rh/ctld.lua")
+  local farp = RH.logistics.register("FARP MUSTANG", { x = 80000, y = 0 }, { label = "FARP MUSTANG", crates = 4 })
+  farp.loadPoints = { { x = 80000, y = -70 } }
+  RH.logistics.refreshMapLabels()
+  T.ok(RH.ctld.showLoadZones({}) >= 1)
+  T.eq(w.drawings["rh-load-FARP MUSTANG-1"].text, "Load")
+  T.eq(w.drawings["farp-stock-FARP MUSTANG"].text, "FARP MUSTANG\nCrates: 4")
+  w.advance(60)
+  T.eq(w.drawings["rh-load-FARP MUSTANG-1"], nil)
+  T.eq(w.drawings["farp-stock-FARP MUSTANG"].text, "FARP MUSTANG\nCrates: 4")
+end)
+
+T.test("the Chinook does not load or drop crates through CTLD", function()
+  T.fresh()
+  dofile("src/rh/ctld.lua")
+  local calls = {}
+  local inst = {
+    hoverautoloading = true,
+    _GetAndLoad = function() calls.get = true end,
+    _LoadCratesNearby = function() calls.load = true end,
+    _UnloadCrates = function() calls.drop = true end,
+    _UnloadSingleCrateSet = function() calls.one = true end,
+    _SendMessage = function(_, text) calls.msg = text end,
+  }
+  RH.ctld.guardChinook(inst)
+  T.eq(inst.hoverautoloading, false)
+  local chinook = { GetTypeName = function() return "CH-47Fbl1" end }
+  local uh = { GetTypeName = function() return "UH-1H" end }
+  T.eq(inst:_GetAndLoad({}, chinook), inst)
+  T.eq(inst:_LoadCratesNearby({}, chinook), inst)
+  T.eq(inst:_UnloadCrates({}, chinook), inst)
+  T.eq(calls.get, nil)
+  T.ok(string.find(calls.msg, "cargo menu", 1, true) ~= nil)
+  inst:_GetAndLoad({}, uh)
+  inst:_UnloadCrates({}, uh)
+  T.eq(calls.get, true)
+  T.eq(calls.drop, true)
+end)
+
+T.test("Chinook ground crew crates are not CTLD boarded cargo", function()
+  T.fresh()
+  dofile("src/rh/ctld.lua")
+  CTLD_CARGO = { Enum = { GCLOADABLE = "gc", TROOPS = "troops", VEHICLE = "vehicle" } }
+  UNIT = { FindByName = function(_, name)
+    if name == "hook" then return { GetTypeName = function() return "CH-47Fbl1" end } end
+    if name == "huey" then return { GetTypeName = function() return "UH-1H" end } end
+  end }
+  local inst = { Loaded_Cargo = {
+    hook = { Cratesloaded = 2, Cargo = {
+      { ClassName = "DYNAMICCARGO", GetType = function() return "gc" end, GetName = function() return "crate" end },
+      { GetType = function() return "troops" end, GetName = function() return "Squad" end },
+    } },
+    huey = { Cratesloaded = 1, Cargo = {
+      { GetType = function() return "vehicle" end, GetName = function() return "Avenger" end },
+    } },
+  } }
+  RH.ctld.forgetChinookGroundCrewCrates(inst)
+  T.eq(#inst.Loaded_Cargo.hook.Cargo, 1)
+  T.eq(inst.Loaded_Cargo.hook.Cratesloaded, 0)
+  T.eq(#inst.Loaded_Cargo.huey.Cargo, 1)
+  UNIT = nil
+  CTLD_CARGO = nil
 end)
 
 T.test("return crates at the tent finds a FARP whose pad is more than 500 m away", function()
@@ -334,7 +408,8 @@ T.test("a built FARP stacked on an editor pad is dropped and the pad shows the c
     if farp.name == "static1-4" then labeled = farp end
   end
   T.eq(labeled.editor, true)
-  T.eq(RH.logistics.mapLabelText(labeled), "FARP ALPHA\nCrates: 0")
+  T.ok(string.find(RH.logistics.mapLabelText(labeled), "Crates: 0", 1, true) ~= nil)
+  T.ok(not RH.logistics.labelIsPlaceholder(labeled.label))
   RH.logistics.spawnBuilt()
   T.eq(#w.farpsSpawned, 1)
   T.eq(w.farpsSpawned[1], "FARP 02")
@@ -343,12 +418,16 @@ end)
 T.test("a marked FARP waits for the next restart and then spawns empty", function()
   local w = setup()
   local mile = RH.config.farp.minSeparation
+  local random = math.random
+  math.random = function() return 1 end
   local farp = RH.logistics.buildFarp({ x = 40000 + mile * 2, y = 0 }, "Viper")
-  T.eq(farp.name, "FARP 01")
+  math.random = random
+  T.eq(farp.name, "FARP COPPERHEAD")
+  T.eq(farp.label, "FARP COPPERHEAD")
   T.eq(farp.crates, 0)
   T.eq(farp.liquids, nil)
   T.eq(farp.pending, true)
-  T.ok(w.files["save/campaign.lua"]:find("FARP 01"), "mark is written immediately")
+  T.ok(w.files["save/campaign.lua"]:find("FARP COPPERHEAD"), "mark is written immediately")
   RH.logistics.spawnBuilt()
   T.eq(farp.built, true)
   T.eq(farp.liquids, nil)

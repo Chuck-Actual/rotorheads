@@ -530,11 +530,14 @@ function dcs.removeDrawing(id)
   dcs.drawIds[id] = nil
 end
 
-function dcs.drawLabel(id, side, point, text, fontSize)
+function dcs.drawLabel(id, side, point, text, fontSize, markId)
   dcs.removeDrawing(id)
   local sideId = SIDE_IDS[side] or -1
-  local textId = dcs.nextDrawId
-  dcs.nextDrawId = dcs.nextDrawId + 1
+  local textId = markId
+  if not textId then
+    textId = dcs.nextDrawId
+    dcs.nextDrawId = dcs.nextDrawId + 1
+  end
   local spot = util.toVec2(point)
   trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
   dcs.drawIds[id] = { textId }

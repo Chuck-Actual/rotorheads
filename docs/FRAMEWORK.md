@@ -50,11 +50,13 @@ Player FARPs are marked in the mission and spawned on a later start by `logistic
 
 The editor pads are separate. On the first start after this change, `logistics.syncPads` gives each pad named with type `FARP` 10 tons of jet fuel (`setLiquidAmount(0, 10000)`) and 40 of `weapons.missiles.AGM_114K`, `weapons.missiles.AGM_114L`, and `weapons.missiles.Vikhr_M`. The grant is stored on `RH.state.padStock[name]` with `granted = true`. Later starts write those saved numbers back. They do not add another 10 tons or another 40. Capture waits 25 seconds so the startup save cannot record an empty warehouse over the grant.
 
-`logistics.discoverEditorPads` also gives each of those pads a crate stock, without rebuilding the pad. `static1-4` is drawn as **FARP ALPHA** and `static1-5` as **FARP BRAVO**. The label sits just east of the pad, white on a dark box, for every coalition: the name, then `Crates: N`. A new pad starts at 0. `RH_FARP_Bassel` stays the logistics center and reads `Crates: unlimited`.
+`logistics.discoverEditorPads` also gives each of those pads a crate stock, without rebuilding the pad. The map label is a name from `config.farp.names` (COPPERHEAD, RATTLESNAKE, MUSTANG, LONGBOW, DAGGER, OUTLAW, WARHORSE, SWITCHBLADE, IRONCLAD, GHOST), picked at random and not reused while that FARP exists. Decommissioning it removes the record and frees the name. The label sits just east of the tent, white on a dark box, for every coalition: the name, then `Crates: N`. It uses its own map mark and stays up. The blue load circle is separate and lasts 60 seconds. CTLD > Show logistics zones draws those circles again. A new pad starts at 0. `RH_FARP_Bassel` stays the logistics center and reads `Crates: unlimited`.
 
 A script-built FARP that lands within 400 m of an editor pad or tent is a duplicate. `logistics.dropStackedFarps` deletes that copy, including `FARP 01` and its tent, depots, and Humvee, and the editor pad keeps the crate count. A marked FARP in an empty field is still spawned.
 
-The editor tent is a CTLD load zone. Troops can always be picked up there. Ground-unit crates can be picked up only while the FARP stock covers them. `logistics.equipEditorFarps` parks the missing Humvee by that tent and writes the pad's fuel and missile grant, so rearm and defuel work at the FARP that was already in the mission.
+The editor tent is a CTLD load zone. Troops can always be picked up there. Ground-unit crates can be picked up only while the FARP stock covers them. Hovering into the zone does not load crates. `logistics.equipEditorFarps` parks the missing Humvee by that tent and writes the pad's fuel and missile grant, so rearm and defuel work at the FARP that was already in the mission.
+
+The CH-47 loads and unloads crates with the rearm/refuel cargo menu, which is what changes the aircraft weight. CTLD Get Crates only puts the crates on the ground for that helicopter. UH helicopters still load and drop with CTLD. Return crates to tent counts the crates on the ground after that unload. General supply is not taken into the tent until that command.
 
 ### MASH and CSAR
 

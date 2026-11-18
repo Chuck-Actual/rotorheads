@@ -61,15 +61,44 @@ function logistics.discoverPlaced()
   logistics.refreshPlacedCenters()
 end
 
-local PAD_NAMES = { "ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT", "GOLF", "HOTEL" }
+local PLACEHOLDER_NAMES = {
+  ALPHA = true, BRAVO = true, CHARLIE = true, DELTA = true,
+  ECHO = true, FOXTROT = true, GOLF = true, HOTEL = true,
+}
 
--- The editor pads are named static1-4 and static1-5. On the map they read FARP ALPHA and FARP BRAVO.
-function logistics.padLabel(name, index)
-  if util.startsWith(name, RH.config.prefixes.farp) then
-    return "FARP " .. name:sub(#RH.config.prefixes.farp + 1):gsub("_", " ")
+function logistics.labelIsPlaceholder(label)
+  if type(label) ~= "string" or label == "" then return true end
+  local rest = label:gsub("^FARP ", "")
+  if PLACEHOLDER_NAMES[rest] then return true end
+  if string.match(rest, "^%d+$") then return true end
+  return false
+end
+
+function logistics.farpNameInUse(label, except)
+  for _, farp in pairs(RH.state.farps) do
+    if farp ~= except and (farp.label == label or farp.name == label) then return true end
   end
-  if util.startsWith(name, "FARP") then return name end
-  return "FARP " .. (PAD_NAMES[index] or tostring(index))
+  return false
+end
+
+-- One unused name from the bank. Decommissioning the FARP drops the record, which frees the name.
+function logistics.pickFarpName(except)
+  local free = {}
+  for _, name in ipairs(fcfg().names or {}) do
+    local label = "FARP " .. name
+    if not logistics.farpNameInUse(label, except) then free[#free + 1] = label end
+  end
+  if #free == 0 then return nil end
+  return free[math.random(#free)]
+end
+
+function logistics.assignFarpNames()
+  for _, farp in pairs(RH.state.farps) do
+    if not farp.lc and logistics.labelIsPlaceholder(farp.label) then
+      local picked = logistics.pickFarpName(farp)
+      if picked then farp.label = picked end
+    end
+  end
 end
 
 function logistics.editorPads()
@@ -111,9 +140,8 @@ local function registerEditorSite(name, point, index)
   if not name or name == "" then return nil end
   local existing = logistics.farpAt(point, 200)
   if existing then
-    -- A tent found first keeps the stock. The pad's ALPHA/BRAVO name is the one on the map.
-    if existing.editor and not logistics.isTent(point) then
-      existing.label = logistics.padLabel(name, index)
+    if existing.editor and not existing.lc and logistics.labelIsPlaceholder(existing.label) then
+      existing.label = logistics.pickFarpName(existing) or existing.label
     end
     return nil
   end
@@ -121,7 +149,7 @@ local function registerEditorSite(name, point, index)
   local lc = airfield ~= nil and airfield.coalition ~= "red"
   return logistics.register(name, point, {
     editor = true,
-    label = logistics.padLabel(name, index),
+    label = lc and nil or logistics.pickFarpName(),
     lc = lc,
     airbase = airfield and airfield.name,
     crates = lc and -1 or nil,
@@ -272,10 +300,19 @@ function logistics.mapLabelText(farp)
   return string.format("%s\nCrates: %s", name, crates)
 end
 
+function logistics.stockMark(farp)
+  if not farp.stockMark then
+    RH.state.stockMarkSeq = (RH.state.stockMarkSeq or 0) + 1
+    farp.stockMark = 900000 + RH.state.stockMarkSeq
+  end
+  return farp.stockMark
+end
+
 function logistics.refreshMapLabels()
   if not RH.dcs.drawLabel then return end
   for _, farp in ipairs(logistics.farps()) do
-    RH.dcs.drawLabel("farp-stock-" .. farp.name, "all", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18)
+    -- Stable mark id, separate from the 60 second debug circles, so the count stays up.
+    RH.dcs.drawLabel("farp-stock-" .. farp.name, "all", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18, logistics.stockMark(farp))
   end
 end
 
@@ -328,11 +365,11 @@ end
 
 function logistics.nextFarpName(kind, airfield)
   if kind == "lc" then return "LC " .. airfield.name end
+  local picked = logistics.pickFarpName()
+  if picked then return picked end
   local n = 1
-  for _, farp in pairs(RH.state.farps) do
-    if not farp.lc and (farp.built or farp.pending) then n = n + 1 end
-  end
-  return string.format("FARP %02d", n)
+  while logistics.farpNameInUse("FARP " .. n) do n = n + 1 end
+  return "FARP " .. n
 end
 
 -- Marks the site. DCS cannot stand up a working FARP in the running mission, so it appears on the next restart.
@@ -346,6 +383,7 @@ function logistics.buildFarp(point, builtBy)
     pending = true,
     airbase = airfield and airfield.name,
     crates = kind == "lc" and -1 or 0,
+    label = kind == "lc" and nil or name,
   })
   RH.dcs.drawCircle("pending-" .. name, "blue", farp, 600, { 0, 0.7, 1, 1 }, { 0, 0.7, 1, 0.15 }, name .. " (next restart)")
   RH.dcs.smoke(farp, RH.config.markers.smokeColors.green)
@@ -873,6 +911,7 @@ function logistics.start()
   logistics.discoverPlaced()
   logistics.dropStackedFarps()
   logistics.discoverEditorPads()
+  logistics.assignFarpNames()
   logistics.spawnPlayerMashes()
   logistics.spawnBuilt()
   logistics.equipEditorFarps()

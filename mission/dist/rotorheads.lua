@@ -301,6 +301,11 @@ RH.config = {
     -- Crates and troops load within this distance of the logistics tent.
     loadRadius = 150,
     displayCirclesFor = 60,
+    -- New FARPs take one of these. A name stays taken until that FARP is decommissioned.
+    names = {
+      "COPPERHEAD", "RATTLESNAKE", "MUSTANG", "LONGBOW", "DAGGER",
+      "OUTLAW", "WARHORSE", "SWITCHBLADE", "IRONCLAD", "GHOST",
+    },
     -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
     airframes = 999,
     -- On the shelf for every helicopter: guns, rounds, rockets, pylons, pods, and air-to-air missiles.
@@ -1145,11 +1150,14 @@ function dcs.removeDrawing(id)
   dcs.drawIds[id] = nil
 end
 
-function dcs.drawLabel(id, side, point, text, fontSize)
+function dcs.drawLabel(id, side, point, text, fontSize, markId)
   dcs.removeDrawing(id)
   local sideId = SIDE_IDS[side] or -1
-  local textId = dcs.nextDrawId
-  dcs.nextDrawId = dcs.nextDrawId + 1
+  local textId = markId
+  if not textId then
+    textId = dcs.nextDrawId
+    dcs.nextDrawId = dcs.nextDrawId + 1
+  end
   local spot = util.toVec2(point)
   trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
   dcs.drawIds[id] = { textId }
@@ -1860,15 +1868,44 @@ function logistics.discoverPlaced()
   logistics.refreshPlacedCenters()
 end
 
-local PAD_NAMES = { "ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT", "GOLF", "HOTEL" }
+local PLACEHOLDER_NAMES = {
+  ALPHA = true, BRAVO = true, CHARLIE = true, DELTA = true,
+  ECHO = true, FOXTROT = true, GOLF = true, HOTEL = true,
+}
 
--- The editor pads are named static1-4 and static1-5. On the map they read FARP ALPHA and FARP BRAVO.
-function logistics.padLabel(name, index)
-  if util.startsWith(name, RH.config.prefixes.farp) then
-    return "FARP " .. name:sub(#RH.config.prefixes.farp + 1):gsub("_", " ")
+function logistics.labelIsPlaceholder(label)
+  if type(label) ~= "string" or label == "" then return true end
+  local rest = label:gsub("^FARP ", "")
+  if PLACEHOLDER_NAMES[rest] then return true end
+  if string.match(rest, "^%d+$") then return true end
+  return false
+end
+
+function logistics.farpNameInUse(label, except)
+  for _, farp in pairs(RH.state.farps) do
+    if farp ~= except and (farp.label == label or farp.name == label) then return true end
   end
-  if util.startsWith(name, "FARP") then return name end
-  return "FARP " .. (PAD_NAMES[index] or tostring(index))
+  return false
+end
+
+-- One unused name from the bank. Decommissioning the FARP drops the record, which frees the name.
+function logistics.pickFarpName(except)
+  local free = {}
+  for _, name in ipairs(fcfg().names or {}) do
+    local label = "FARP " .. name
+    if not logistics.farpNameInUse(label, except) then free[#free + 1] = label end
+  end
+  if #free == 0 then return nil end
+  return free[math.random(#free)]
+end
+
+function logistics.assignFarpNames()
+  for _, farp in pairs(RH.state.farps) do
+    if not farp.lc and logistics.labelIsPlaceholder(farp.label) then
+      local picked = logistics.pickFarpName(farp)
+      if picked then farp.label = picked end
+    end
+  end
 end
 
 function logistics.editorPads()
@@ -1910,9 +1947,8 @@ local function registerEditorSite(name, point, index)
   if not name or name == "" then return nil end
   local existing = logistics.farpAt(point, 200)
   if existing then
-    -- A tent found first keeps the stock. The pad's ALPHA/BRAVO name is the one on the map.
-    if existing.editor and not logistics.isTent(point) then
-      existing.label = logistics.padLabel(name, index)
+    if existing.editor and not existing.lc and logistics.labelIsPlaceholder(existing.label) then
+      existing.label = logistics.pickFarpName(existing) or existing.label
     end
     return nil
   end
@@ -1920,7 +1956,7 @@ local function registerEditorSite(name, point, index)
   local lc = airfield ~= nil and airfield.coalition ~= "red"
   return logistics.register(name, point, {
     editor = true,
-    label = logistics.padLabel(name, index),
+    label = lc and nil or logistics.pickFarpName(),
     lc = lc,
     airbase = airfield and airfield.name,
     crates = lc and -1 or nil,
@@ -2071,10 +2107,19 @@ function logistics.mapLabelText(farp)
   return string.format("%s\nCrates: %s", name, crates)
 end
 
+function logistics.stockMark(farp)
+  if not farp.stockMark then
+    RH.state.stockMarkSeq = (RH.state.stockMarkSeq or 0) + 1
+    farp.stockMark = 900000 + RH.state.stockMarkSeq
+  end
+  return farp.stockMark
+end
+
 function logistics.refreshMapLabels()
   if not RH.dcs.drawLabel then return end
   for _, farp in ipairs(logistics.farps()) do
-    RH.dcs.drawLabel("farp-stock-" .. farp.name, "all", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18)
+    -- Stable mark id, separate from the 60 second debug circles, so the count stays up.
+    RH.dcs.drawLabel("farp-stock-" .. farp.name, "all", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18, logistics.stockMark(farp))
   end
 end
 
@@ -2127,11 +2172,11 @@ end
 
 function logistics.nextFarpName(kind, airfield)
   if kind == "lc" then return "LC " .. airfield.name end
+  local picked = logistics.pickFarpName()
+  if picked then return picked end
   local n = 1
-  for _, farp in pairs(RH.state.farps) do
-    if not farp.lc and (farp.built or farp.pending) then n = n + 1 end
-  end
-  return string.format("FARP %02d", n)
+  while logistics.farpNameInUse("FARP " .. n) do n = n + 1 end
+  return "FARP " .. n
 end
 
 -- Marks the site. DCS cannot stand up a working FARP in the running mission, so it appears on the next restart.
@@ -2145,6 +2190,7 @@ function logistics.buildFarp(point, builtBy)
     pending = true,
     airbase = airfield and airfield.name,
     crates = kind == "lc" and -1 or 0,
+    label = kind == "lc" and nil or name,
   })
   RH.dcs.drawCircle("pending-" .. name, "blue", farp, 600, { 0, 0.7, 1, 1 }, { 0, 0.7, 1, 0.15 }, name .. " (next restart)")
   RH.dcs.smoke(farp, RH.config.markers.smokeColors.green)
@@ -2672,6 +2718,7 @@ function logistics.start()
   logistics.discoverPlaced()
   logistics.dropStackedFarps()
   logistics.discoverEditorPads()
+  logistics.assignFarpNames()
   logistics.spawnPlayerMashes()
   logistics.spawnBuilt()
   logistics.equipEditorFarps()
@@ -3931,7 +3978,10 @@ function ctld.addFarpZone(farp)
     ctld.instance:AddCTLDZone(zoneName, CTLD.CargoZoneType.LOAD, SMOKECOLOR.Blue, true, false)
     local id = "rh-load-" .. farp.name .. "-" .. i
     RH.dcs.drawCircle(id, "blue", point, radius, { 0, 0.55, 1, 1 }, { 0, 0.55, 1, 0.18 }, "Load")
-    RH.after(60, function() RH.dcs.removeDrawing(id) end)
+    RH.after(RH.config.farp.displayCirclesFor or 60, function()
+      RH.dcs.removeDrawing(id)
+      if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
+    end)
   end
   farp.loadZoneReady = true
   return atTent
@@ -3955,6 +4005,8 @@ function ctld.create()
   -- and the default refuses to build them until they are packed and dropped again.
   inst.movecratesbeforebuild = false
   inst.forcehoverload = false
+  -- Hovering into a load zone must not pull crates aboard. The pilot loads on purpose.
+  inst.hoverautoloading = false
   inst.CrateDistance = 50
   inst.PackDistance = 50
   inst.buildtime = 5
@@ -4022,6 +4074,7 @@ function ctld.create()
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
   ctld.installHooks(inst)
+  ctld.guardChinook(inst)
   ctld.installMenus(inst)
   inst:__Start(2)
   -- Once the world snapshot exists it restores vehicles and crates itself. Loading CTLD's
@@ -4045,6 +4098,114 @@ function ctld.placeBehind(group, pilot)
   group:Respawn(nil, true)
 end
 
+ctld.chinookCargoMessage = "The Chinook loads and unloads crates from the rearm/refuel cargo menu. Get Crates puts them on the ground. Unload at the tent, then use Return crates to tent."
+
+function ctld.isChinook(unit)
+  return unit and unit.GetTypeName and unit:GetTypeName() == "CH-47Fbl1"
+end
+
+function ctld.cargoVec2(cargo)
+  if not cargo then return nil end
+  if cargo.GetVec2 then
+    local point = cargo:GetVec2()
+    if point and point.x then return point end
+  end
+  if cargo.GetCoordinate then
+    local coord = cargo:GetCoordinate()
+    if coord and coord.GetVec2 then
+      local point = coord:GetVec2()
+      if point and point.x then return point end
+    end
+  end
+  if cargo.x and cargo.y then return { x = cargo.x, y = cargo.y } end
+end
+
+function ctld.spawnedCratesNearby(inst, point, reach)
+  local count = 0
+  for _, crate in pairs(inst.Spawned_Cargo or {}) do
+    local body = crate.GetPositionable and crate:GetPositionable()
+    local alive = body and (not body.IsAlive or body:IsAlive())
+    local pos = (alive and ctld.cargoVec2(body)) or ctld.cargoVec2(crate)
+    if pos and util.distance(pos, point) <= reach then count = count + 1 end
+  end
+  return count
+end
+
+-- Chinook ground-crew cargo is not CTLD boarded cargo. Counting it here as well double-books the weight.
+function ctld.forgetChinookGroundCrewCrates(inst)
+  if not inst or not inst.Loaded_Cargo or not UNIT or not UNIT.FindByName then return end
+  local gc = CTLD_CARGO and CTLD_CARGO.Enum and CTLD_CARGO.Enum.GCLOADABLE
+  for unitName, loaded in pairs(inst.Loaded_Cargo) do
+    local unit = UNIT:FindByName(unitName)
+    if ctld.isChinook(unit) and type(loaded) == "table" and loaded.Cargo then
+      local keep = {}
+      local crates = 0
+      for _, item in pairs(loaded.Cargo) do
+        local kind = item and item.GetType and item:GetType()
+        local groundCrew = item and (item.ClassName == "DYNAMICCARGO" or (gc and kind == gc))
+        if not groundCrew then
+          keep[#keep + 1] = item
+          if kind ~= (CTLD_CARGO and CTLD_CARGO.Enum.TROOPS) and kind ~= (CTLD_CARGO and CTLD_CARGO.Enum.ENGINEERS) then
+            crates = crates + 1
+          end
+        end
+      end
+      loaded.Cargo = keep
+      loaded.Cratesloaded = crates
+    end
+  end
+end
+
+function ctld.guardChinook(inst)
+  if not inst then return end
+  inst.hoverautoloading = false
+  local function block(methodName)
+    local inner = inst[methodName]
+    if not inner then return end
+    inst[methodName] = function(self, Group, Unit, ...)
+      if ctld.isChinook(Unit) then
+        self:_SendMessage(ctld.chinookCargoMessage, 15, false, Group)
+        return self
+      end
+      return inner(self, Group, Unit, ...)
+    end
+  end
+  block("_GetAndLoad")
+  block("_LoadCratesNearby")
+  block("_UnloadCrates")
+  block("_UnloadSingleCrateSet")
+  local handler = inst._EventHandler
+  if handler then
+    function inst:_EventHandler(EventData)
+      handler(self, EventData)
+      local id = EventData and EventData.id
+      if EVENTS and (id == EVENTS.DynamicCargoLoaded or id == EVENTS.DynamicCargoUnloaded or id == EVENTS.DynamicCargoRemoved) then
+        ctld.forgetChinookGroundCrewCrates(self)
+      end
+    end
+  end
+end
+
+function ctld.showLoadZones(group)
+  local seconds = RH.config.farp.displayCirclesFor or 60
+  local drawn = 0
+  for _, farp in ipairs(RH.logistics.farps()) do
+    local points = (farp.loadPoints and #farp.loadPoints > 0) and farp.loadPoints or { { x = farp.x, y = farp.y } }
+    for i, point in ipairs(points) do
+      local id = "rh-load-" .. farp.name .. "-" .. i
+      RH.dcs.drawCircle(id, "blue", point, RH.config.farp.loadRadius or 150, { 0, 0.55, 1, 1 }, { 0, 0.55, 1, 0.18 }, "Load")
+      drawn = drawn + 1
+      RH.after(seconds, function()
+        RH.dcs.removeDrawing(id)
+        if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
+      end)
+    end
+  end
+  if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
+  ctld.reply(group, string.format("Logistics zones shown for %d seconds. Crate counts stay on the map.", seconds))
+  return drawn
+end
+
 function ctld.attachReturnCommand(inst, group, unit)
   if not group or not MENU_GROUP_COMMAND then return end
   group.RHReturnParents = group.RHReturnParents or {}
@@ -4053,10 +4214,14 @@ function ctld.attachReturnCommand(inst, group, unit)
   if group.MyTopCratesMenu then table.insert(parents, group.MyTopCratesMenu) end
   for _, parent in ipairs(parents) do
     if not group.RHReturnParents[parent] then
-      local command = MENU_GROUP_COMMAND:New(group, "Return crates to tent", parent, function()
-        ctld.returnCratesToTent(inst, group, unit)
-      end)
-      if command and command.Refresh then command:Refresh() end
+      local commands = {
+        { "Show logistics zones", function() ctld.showLoadZones(group) end },
+        { "Return crates to tent", function() ctld.returnCratesToTent(inst, group, unit) end },
+      }
+      for _, command in ipairs(commands) do
+        local item = MENU_GROUP_COMMAND:New(group, command[1], parent, command[2])
+        if item and item.Refresh then item:Refresh() end
+      end
       group.RHReturnParents[parent] = true
     end
   end
@@ -4110,11 +4275,9 @@ function ctld.farpForReturn(point)
   local spot = pad or tent
   local name = (pad and pad.name and pad.name ~= "" and pad.name) or (tent.name ~= "" and tent.name) or "FARP"
   if RH.state.farps[name] then return RH.state.farps[name], tent end
-  local index = 0
-  for _ in pairs(RH.state.farps) do index = index + 1 end
   return RH.logistics.register(name, spot, {
     editor = true,
-    label = RH.logistics.padLabel(name, index + 1),
+    label = RH.logistics.pickFarpName(),
   }), tent
 end
 
@@ -4125,6 +4288,26 @@ function ctld.returnCratesToTent(inst, group, unit)
   if not farp then
     ctld.reply(group, "Park within 150 m of the FARP tent, then return the crates.")
     return
+  end
+  local reach = RH.config.farp.loadRadius or 150
+  if inst and ctld.spawnedCratesNearby(inst, point, reach) == 0 then
+    local worth = 0
+    local removed = 0
+    for name, cargo in pairs(inst.DynamicCargo or {}) do
+      local pos = ctld.cargoVec2(cargo)
+      if pos and util.distance(pos, point) <= reach then
+        worth = worth + RH.logistics.crateWorth(cargo.GetName and cargo:GetName() or name)
+        if cargo.Destroy then cargo:Destroy(false) end
+        inst.DynamicCargo[name] = nil
+        removed = removed + 1
+      end
+    end
+    if removed > 0 then
+      local added = RH.logistics.returnCrates(farp, worth)
+      ctld.reply(group, string.format("%d crates returned to %s stock (now %s).", added, RH.logistics.displayName(farp),
+        RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
+      return
+    end
   end
   if not inst or not inst._RemoveCratesNearby then return end
   local previous = inst.CrateDistance

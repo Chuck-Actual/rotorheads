@@ -150,8 +150,8 @@ function fake.new()
   function dcs.drawCircle(id, side, point, radius, line, fill, text)
     w.drawings[id] = { side = side, point = point, radius = radius, line = line, fill = fill, text = text }
   end
-  function dcs.drawLabel(id, side, point, text, fontSize)
-    w.drawings[id] = { side = side, point = point, text = text, fontSize = fontSize, kind = "label" }
+  function dcs.drawLabel(id, side, point, text, fontSize, markId)
+    w.drawings[id] = { side = side, point = point, text = text, fontSize = fontSize, markId = markId, kind = "label" }
   end
   function dcs.removeDrawing(id) w.drawings[id] = nil end
   function dcs.message(side, text) table.insert(w.messages, { side = side, text = text }) end
