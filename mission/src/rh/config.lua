@@ -148,7 +148,7 @@ RH.config = {
     crates = 6,
     crateMass = 400,
     -- A MASH builds only inside this distance of a FARP or Logistics Center.
-    nearSite = 500,
+    nearSite = 1000,
     -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
     capacity = 9999,
     -- Drop off rescued pilots within this distance of the hospital tent.

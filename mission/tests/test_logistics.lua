@@ -484,7 +484,7 @@ T.test("cannot build an LC at a red airfield", function()
   T.ok(reason:find("REDFOR"), reason)
 end)
 
-T.test("a MASH builds only within 500 m of a FARP or Logistics Center", function()
+T.test("a MASH builds only within 1 km of a FARP or Logistics Center", function()
   local w = setup()
   w.statics["static1-7"] = { alive = true, typeName = "FARP", point = { x = 39745, y = 0 }, side = "blue" }
   w.statics["static1-3"] = { alive = true, typeName = "FARP", point = { x = 39503, y = 0 }, side = "blue" }
@@ -493,15 +493,15 @@ T.test("a MASH builds only within 500 m of a FARP or Logistics Center", function
   })
   local ok, reason = RH.logistics.validateMashSite({ x = 100000, y = 0 })
   T.eq(ok, false)
-  T.ok(reason:find("not within 500 m"), reason)
-  -- 255 m from the FARP, and closer to a pad static. The static does not block the build.
-  T.ok(RH.logistics.buildMash({ x = 39745, y = 0 }, "Medic"))
+  T.ok(reason:find("not within 1000 m"), reason)
+  -- Inside the 150 m FARP load circle, and closer to a pad static. Neither blocks the build.
+  T.ok(RH.logistics.buildMash({ x = 39900, y = 0 }, "Medic"))
   T.eq(RH.state.mashes["MASH 01"].player, true)
-  -- 490 m from the FARP, 7 m from a pad, and 74 m from a blue vehicle.
-  T.ok(RH.logistics.buildMash({ x = 39510, y = 0 }, "Medic"))
-  ok, reason = RH.logistics.validateMashSite({ x = 40600, y = 0 })
+  -- 900 m from the FARP, still inside the 1 km limit, next to a pad and a blue vehicle.
+  T.ok(RH.logistics.buildMash({ x = 39100, y = 0 }, "Medic"))
+  ok, reason = RH.logistics.validateMashSite({ x = 41100, y = 0 })
   T.eq(ok, false)
-  T.ok(reason:find("not within 500 m"), reason)
+  T.ok(reason:find("not within 1000 m"), reason)
   T.ok(RH.logistics.buildMash({ x = 900, y = 0 }, "Medic"))
   T.eq(#w.mashesSpawned, 3)
 end)

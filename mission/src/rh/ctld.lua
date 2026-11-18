@@ -182,7 +182,9 @@ function ctld.create()
   inst.enableChinookGCLoading = true
   inst.enableFixedWing = true
   inst.dropcratesanywhere = true
-  inst.nobuildinloadzones = true
+  -- The load circle is 150 m at a FARP tent and 500 m at a logistics center. A MASH is built
+  -- inside that circle, so MOOSE must not refuse a build there.
+  inst.nobuildinloadzones = false
   -- Chinooks unload through the rearm/refuel window. Those crates were never "moved" by CTLD,
   -- and the default refuses to build them until they are packed and dropped again.
   inst.movecratesbeforebuild = false

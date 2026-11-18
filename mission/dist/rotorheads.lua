@@ -339,7 +339,7 @@ RH.config = {
     crates = 6,
     crateMass = 400,
     -- A MASH builds only inside this distance of a FARP or Logistics Center.
-    nearSite = 500,
+    nearSite = 1000,
     -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
     capacity = 9999,
     -- Drop off rescued pilots within this distance of the hospital tent.
@@ -4030,7 +4030,9 @@ function ctld.create()
   inst.enableChinookGCLoading = true
   inst.enableFixedWing = true
   inst.dropcratesanywhere = true
-  inst.nobuildinloadzones = true
+  -- The load circle is 150 m at a FARP tent and 500 m at a logistics center. A MASH is built
+  -- inside that circle, so MOOSE must not refuse a build there.
+  inst.nobuildinloadzones = false
   -- Chinooks unload through the rearm/refuel window. Those crates were never "moved" by CTLD,
   -- and the default refuses to build them until they are packed and dropped again.
   inst.movecratesbeforebuild = false
