@@ -545,7 +545,7 @@ function ctld.installHooks(inst)
       end
       local added = RH.logistics.returnCrates(farp, worth)
       if added > 0 then
-        ctld.reply(Group, string.format("%d crates returned to %s stock (now %s).", added, farp.name,
+        ctld.reply(Group, string.format("%d crates returned to %s stock (now %s).", added, RH.logistics.displayName(farp),
           RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
       end
     end

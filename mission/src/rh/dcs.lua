@@ -530,17 +530,22 @@ function dcs.removeDrawing(id)
   dcs.drawIds[id] = nil
 end
 
-function dcs.drawLabel(id, side, point, text, fontSize, markId)
-  dcs.removeDrawing(id)
-  local sideId = SIDE_IDS[side] or -1
-  local textId = markId
-  if not textId then
-    textId = dcs.nextDrawId
-    dcs.nextDrawId = dcs.nextDrawId + 1
+function dcs.drawLabel(id, side, point, text, fontSize, _markId)
+  -- DCS will not show a mark id again after removeMark. Update the existing mark,
+  -- and only create one with a fresh id.
+  local ids = dcs.drawIds[id]
+  local spot = vec3(util.toVec2(point))
+  if ids and ids[1] and trigger.action.setMarkupText then
+    trigger.action.setMarkupText(ids[1], text)
+    if trigger.action.setMarkupPositionStart then trigger.action.setMarkupPositionStart(ids[1], spot) end
+    return ids[1]
   end
-  local spot = util.toVec2(point)
-  trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
+  local textId = dcs.nextDrawId
+  dcs.nextDrawId = dcs.nextDrawId + 1
+  local sideId = SIDE_IDS[side] or -1
+  trigger.action.textToAll(sideId, textId, spot, { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
   dcs.drawIds[id] = { textId }
+  return textId
 end
 
 function dcs.drawCircle(id, side, point, radius, lineColor, fillColor, text)

@@ -1152,17 +1152,22 @@ function dcs.removeDrawing(id)
   dcs.drawIds[id] = nil
 end
 
-function dcs.drawLabel(id, side, point, text, fontSize, markId)
-  dcs.removeDrawing(id)
-  local sideId = SIDE_IDS[side] or -1
-  local textId = markId
-  if not textId then
-    textId = dcs.nextDrawId
-    dcs.nextDrawId = dcs.nextDrawId + 1
+function dcs.drawLabel(id, side, point, text, fontSize, _markId)
+  -- DCS will not show a mark id again after removeMark. Update the existing mark,
+  -- and only create one with a fresh id.
+  local ids = dcs.drawIds[id]
+  local spot = vec3(util.toVec2(point))
+  if ids and ids[1] and trigger.action.setMarkupText then
+    trigger.action.setMarkupText(ids[1], text)
+    if trigger.action.setMarkupPositionStart then trigger.action.setMarkupPositionStart(ids[1], spot) end
+    return ids[1]
   end
-  local spot = util.toVec2(point)
-  trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
+  local textId = dcs.nextDrawId
+  dcs.nextDrawId = dcs.nextDrawId + 1
+  local sideId = SIDE_IDS[side] or -1
+  trigger.action.textToAll(sideId, textId, spot, { 1, 1, 1, 1 }, { 0, 0, 0, 0.55 }, fontSize or 16, true, text)
   dcs.drawIds[id] = { textId }
+  return textId
 end
 
 function dcs.drawCircle(id, side, point, radius, lineColor, fillColor, text)
@@ -2108,8 +2113,14 @@ function logistics.displayName(farp)
 end
 
 function logistics.labelPoint(farp)
-  local anchor = logistics.nearestTent(farp, 250) or farp
-  return util.offset(anchor, math.pi / 2, 45)
+  local anchor = farp
+  if RH.dcs.staticObjects then
+    for _, static in ipairs(RH.dcs.staticObjects()) do
+      if static.name == farp.name then anchor = static break end
+    end
+  end
+  if anchor == farp then anchor = logistics.nearestTent(farp, 400) or farp end
+  return util.offset(anchor, math.pi / 2, 25)
 end
 
 function logistics.mapLabelText(farp)
@@ -2119,19 +2130,14 @@ function logistics.mapLabelText(farp)
   return string.format("%s\nCrates: %s", name, crates)
 end
 
-function logistics.stockMark(farp)
-  if not farp.stockMark then
-    RH.state.stockMarkSeq = (RH.state.stockMarkSeq or 0) + 1
-    farp.stockMark = 900000 + RH.state.stockMarkSeq
-  end
-  return farp.stockMark
-end
-
 function logistics.refreshMapLabels()
   if not RH.dcs.drawLabel then return end
   for _, farp in ipairs(logistics.farps()) do
-    -- Stable mark id, separate from the 60 second debug circles, so the count stays up.
-    RH.dcs.drawLabel("farp-stock-" .. farp.name, "all", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18, logistics.stockMark(farp))
+    farp.stockMark = nil
+    if farp.x and farp.y then
+      local ok, err = pcall(RH.dcs.drawLabel, "farp-stock-" .. farp.name, "blue", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18)
+      if not ok then util.log("FARP label %s failed: %s", tostring(farp.name), tostring(err)) end
+    end
   end
 end
 
@@ -4412,7 +4418,7 @@ function ctld.installHooks(inst)
       end
       local added = RH.logistics.returnCrates(farp, worth)
       if added > 0 then
-        ctld.reply(Group, string.format("%d crates returned to %s stock (now %s).", added, farp.name,
+        ctld.reply(Group, string.format("%d crates returned to %s stock (now %s).", added, RH.logistics.displayName(farp),
           RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
       end
     end

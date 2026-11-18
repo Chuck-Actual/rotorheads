@@ -299,8 +299,14 @@ function logistics.displayName(farp)
 end
 
 function logistics.labelPoint(farp)
-  local anchor = logistics.nearestTent(farp, 250) or farp
-  return util.offset(anchor, math.pi / 2, 45)
+  local anchor = farp
+  if RH.dcs.staticObjects then
+    for _, static in ipairs(RH.dcs.staticObjects()) do
+      if static.name == farp.name then anchor = static break end
+    end
+  end
+  if anchor == farp then anchor = logistics.nearestTent(farp, 400) or farp end
+  return util.offset(anchor, math.pi / 2, 25)
 end
 
 function logistics.mapLabelText(farp)
@@ -310,19 +316,14 @@ function logistics.mapLabelText(farp)
   return string.format("%s\nCrates: %s", name, crates)
 end
 
-function logistics.stockMark(farp)
-  if not farp.stockMark then
-    RH.state.stockMarkSeq = (RH.state.stockMarkSeq or 0) + 1
-    farp.stockMark = 900000 + RH.state.stockMarkSeq
-  end
-  return farp.stockMark
-end
-
 function logistics.refreshMapLabels()
   if not RH.dcs.drawLabel then return end
   for _, farp in ipairs(logistics.farps()) do
-    -- Stable mark id, separate from the 60 second debug circles, so the count stays up.
-    RH.dcs.drawLabel("farp-stock-" .. farp.name, "all", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18, logistics.stockMark(farp))
+    farp.stockMark = nil
+    if farp.x and farp.y then
+      local ok, err = pcall(RH.dcs.drawLabel, "farp-stock-" .. farp.name, "blue", logistics.labelPoint(farp), logistics.mapLabelText(farp), 18)
+      if not ok then util.log("FARP label %s failed: %s", tostring(farp.name), tostring(err)) end
+    end
   end
 end
 

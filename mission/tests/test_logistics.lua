@@ -76,9 +76,13 @@ T.test("editor pads take two different bank names and keep a crate count", funct
   RH.logistics.refreshMapLabels()
   local label = w.drawings["farp-stock-static1-5"]
   T.eq(label.text, "FARP RATTLESNAKE\nCrates: 0")
-  T.eq(label.side, "all")
+  T.eq(label.side, "blue")
   T.eq(label.fontSize, 18)
-  T.eq(label.markId, second.stockMark)
+  local markId = label.markId
+  second.crates = 74
+  RH.logistics.refreshMapLabels()
+  T.eq(w.drawings["farp-stock-static1-5"].text, "FARP RATTLESNAKE\nCrates: 74")
+  T.eq(w.drawings["farp-stock-static1-5"].markId, markId)
   RH.state.farps["static1-4"] = nil
   math.random = function() return 1 end
   T.eq(RH.logistics.pickFarpName(), "FARP COPPERHEAD")
@@ -575,4 +579,33 @@ T.test("captured outposts extend the blue zone", function()
   T.ok(not RH.logistics.inBlueZone({ x = 90000, y = 0 }))
   RH.state.outposts.RH_OUTPOST_KAFR = { status = "captured" }
   T.ok(RH.logistics.inBlueZone({ x = 90000, y = 1000 }))
+end)
+
+T.test("an existing FARP label stays up and the crate count is rewritten on it", function()
+  local textCalls, updates = {}, {}
+  trigger = { action = {
+    textToAll = function(_, id, _, _, _, _, _, text) textCalls[#textCalls + 1] = { id = id, text = text } end,
+    setMarkupText = function(id, text) updates[#updates + 1] = { id = id, text = text } end,
+    setMarkupPositionStart = function() end,
+    removeMark = function() end,
+  } }
+  land = { getHeight = function() return 0 end }
+  world = { event = {
+    S_EVENT_BIRTH = 1, S_EVENT_DEAD = 2, S_EVENT_UNIT_LOST = 3, S_EVENT_PILOT_DEAD = 4,
+    S_EVENT_EJECTION = 5, S_EVENT_CRASH = 6, S_EVENT_PLAYER_LEAVE_UNIT = 7, S_EVENT_KILL = 8,
+    S_EVENT_SHOT = 9, S_EVENT_LAND = 10, S_EVENT_MARK_ADDED = 11, S_EVENT_MARK_CHANGE = 12,
+    S_EVENT_MARK_REMOVED = 13,
+  } }
+  local saved = RH.dcs
+  dofile("src/rh/dcs.lua")
+  RH.dcs.drawLabel("farp-stock-static1-7", "blue", { x = 40763, y = 9510 }, "FARP COPPERHEAD\nCrates: 49", 18, 900001)
+  RH.dcs.drawLabel("farp-stock-static1-7", "blue", { x = 40763, y = 9510 }, "FARP COPPERHEAD\nCrates: 74", 18, 900001)
+  T.eq(#textCalls, 1)
+  T.ok(textCalls[1].id ~= 900001)
+  T.eq(textCalls[1].text, "FARP COPPERHEAD\nCrates: 49")
+  T.eq(#updates, 1)
+  T.eq(updates[1].id, textCalls[1].id)
+  T.eq(updates[1].text, "FARP COPPERHEAD\nCrates: 74")
+  RH.dcs = saved
+  trigger, land, world = nil, nil, nil
 end)
