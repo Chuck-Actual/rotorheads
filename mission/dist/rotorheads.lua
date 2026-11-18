@@ -4406,7 +4406,8 @@ function RH.start()
     RH.dcs.message("all", "ROTORHEADS WARNING: MissionScripting.lua is not desanitized, so the campaign will NOT be saved. See README step 1.", 60)
   end
   RH.persistence.load()
-  if RH.world and RH.world.readOfficialSave then RH.world.readOfficialSave() end
+  -- The disk save in Saved Games\DCS\rotorheads is the only resume path. A DCS Save Mission
+  -- also stores a copy inside the miz, and loading that copy put editor-deleted units back.
   if RH.world and RH.world.installOfficialSave then RH.world.installOfficialSave() end
   if RH.world and RH.world.restore then RH.world.restore() end
   RH.events.install()
