@@ -1421,6 +1421,41 @@ function dcs.spawnFarp(farp)
   if RH.after then RH.after(2, fill) end
 end
 
+function dcs.farpPads()
+  local pads = {}
+  for _, static in ipairs(dcs.staticObjects()) do
+    if static.typeName == "FARP" then pads[#pads + 1] = static.name end
+  end
+  return pads
+end
+
+function dcs.writePadStock(name, stock)
+  local wh = dcs.farpWarehouse(name)
+  if not wh or type(stock) ~= "table" then return false end
+  if wh.setLiquidAmount then pcall(function() wh:setLiquidAmount(0, stock.fuelKg or 0) end) end
+  if wh.setItem then
+    for item, amount in pairs(stock.missiles or {}) do
+      if type(item) == "string" and type(amount) == "number" and amount >= 0 then
+        pcall(function() wh:setItem(item, amount) end)
+      end
+    end
+  end
+  return true
+end
+
+function dcs.readPadStock(name, tracked)
+  local wh = dcs.farpWarehouse(name)
+  if not wh or not wh.getLiquidAmount or not wh.getItemCount then return nil end
+  local ok, fuel = pcall(function() return wh:getLiquidAmount(0) end)
+  if not ok or type(fuel) ~= "number" then return nil end
+  local missiles = {}
+  for item in pairs(tracked or {}) do
+    local okN, n = pcall(function() return wh:getItemCount(item) end)
+    if okN and type(n) == "number" then missiles[item] = n end
+  end
+  return { fuelKg = fuel, missiles = missiles }
+end
+
 function dcs.farpWarehouse(name)
   if not Airbase or not Airbase.getByName then return nil end
   local ok, ab = pcall(Airbase.getByName, name)
@@ -2012,10 +2047,67 @@ function logistics.spawnBuilt()
 end
 
 function logistics.captureStocks()
-  if not RH.dcs.captureFarpStock then return end
-  for name in pairs(logistics.sessionSpawned or {}) do
-    local farp = RH.state.farps[name]
-    if farp then RH.dcs.captureFarpStock(farp) end
+  if RH.dcs.captureFarpStock then
+    for name in pairs(logistics.sessionSpawned or {}) do
+      local farp = RH.state.farps[name]
+      if farp then RH.dcs.captureFarpStock(farp) end
+    end
+  end
+  logistics.capturePads()
+end
+
+-- One load for the editor pads (static1-4 and static1-5). Later restarts write the
+-- saved figures back and do not add another 10 tons or another 40 missiles.
+logistics.padHold = {}
+
+function logistics.openingPadStock()
+  return {
+    fuelKg = 10000,
+    missiles = {
+      ["weapons.missiles.AGM_114K"] = 40,
+      ["weapons.missiles.AGM_114L"] = 40,
+      ["weapons.missiles.Vikhr_M"] = 40,
+    },
+  }
+end
+
+function logistics.ensurePadStock(name)
+  RH.state.padStock = RH.state.padStock or {}
+  local saved = RH.state.padStock[name]
+  if type(saved) == "table" and saved.granted and type(saved.fuelKg) == "number" and type(saved.missiles) == "table" then
+    return saved, false
+  end
+  local stock = logistics.openingPadStock()
+  stock.granted = true
+  RH.state.padStock[name] = stock
+  return stock, true
+end
+
+function logistics.syncPads()
+  if not RH.dcs.farpPads or not RH.dcs.writePadStock then return end
+  local fresh = {}
+  for _, name in ipairs(RH.dcs.farpPads()) do
+    local stock, granted = logistics.ensurePadStock(name)
+    RH.dcs.writePadStock(name, stock)
+    if logistics.padHold[name] == nil then logistics.padHold[name] = RH.dcs.now() + 25 end
+    if granted then fresh[#fresh + 1] = name end
+  end
+  if #fresh > 0 then
+    RH.dcs.message("blue", "One-time FARP stock, 10 tons of fuel and 40 AGM-114K, AGM-114L, and Vikhr: " .. table.concat(fresh, ", "), 30)
+  end
+end
+
+function logistics.capturePads()
+  if not RH.dcs.readPadStock then return end
+  RH.state.padStock = RH.state.padStock or {}
+  for name, saved in pairs(RH.state.padStock) do
+    if type(saved) == "table" and saved.granted and not (logistics.padHold[name] and RH.dcs.now() < logistics.padHold[name]) then
+      local live = RH.dcs.readPadStock(name, saved.missiles)
+      if live then
+        live.granted = true
+        RH.state.padStock[name] = live
+      end
+    end
   end
 end
 
@@ -2304,6 +2396,11 @@ function logistics.start()
     RH.dcs.spawnMash(name, m)
   end
   logistics.spawnBuilt()
+  logistics.syncPads()
+  if RH.after then
+    RH.after(2, logistics.syncPads)
+    RH.after(10, logistics.syncPads)
+  end
   logistics.refreshMapLabels()
   RH.every(30, logistics.refreshMapLabels)
   -- Fuel and ammo change while people are flying. Write them down often, not only every five minutes.

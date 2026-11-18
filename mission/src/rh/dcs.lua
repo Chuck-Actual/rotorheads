@@ -811,6 +811,41 @@ function dcs.spawnFarp(farp)
   if RH.after then RH.after(2, fill) end
 end
 
+function dcs.farpPads()
+  local pads = {}
+  for _, static in ipairs(dcs.staticObjects()) do
+    if static.typeName == "FARP" then pads[#pads + 1] = static.name end
+  end
+  return pads
+end
+
+function dcs.writePadStock(name, stock)
+  local wh = dcs.farpWarehouse(name)
+  if not wh or type(stock) ~= "table" then return false end
+  if wh.setLiquidAmount then pcall(function() wh:setLiquidAmount(0, stock.fuelKg or 0) end) end
+  if wh.setItem then
+    for item, amount in pairs(stock.missiles or {}) do
+      if type(item) == "string" and type(amount) == "number" and amount >= 0 then
+        pcall(function() wh:setItem(item, amount) end)
+      end
+    end
+  end
+  return true
+end
+
+function dcs.readPadStock(name, tracked)
+  local wh = dcs.farpWarehouse(name)
+  if not wh or not wh.getLiquidAmount or not wh.getItemCount then return nil end
+  local ok, fuel = pcall(function() return wh:getLiquidAmount(0) end)
+  if not ok or type(fuel) ~= "number" then return nil end
+  local missiles = {}
+  for item in pairs(tracked or {}) do
+    local okN, n = pcall(function() return wh:getItemCount(item) end)
+    if okN and type(n) == "number" then missiles[item] = n end
+  end
+  return { fuelKg = fuel, missiles = missiles }
+end
+
 function dcs.farpWarehouse(name)
   if not Airbase or not Airbase.getByName then return nil end
   local ok, ab = pcall(Airbase.getByName, name)

@@ -12,6 +12,26 @@ local function setup()
   return w
 end
 
+T.test("a FARP pad is granted 10 tons and 40 missiles once, then restarts keep the saved count", function()
+  T.fresh()
+  local stock, fresh = RH.logistics.ensurePadStock("static1-4")
+  T.ok(fresh)
+  T.eq(stock.fuelKg, 10000)
+  T.eq(stock.missiles["weapons.missiles.AGM_114K"], 40)
+  T.eq(stock.missiles["weapons.missiles.AGM_114L"], 40)
+  T.eq(stock.missiles["weapons.missiles.Vikhr_M"], 40)
+  stock.fuelKg = 4000
+  stock.missiles["weapons.missiles.AGM_114K"] = 12
+  stock.missiles["weapons.missiles.AGM_114L"] = 7
+  stock.missiles["weapons.missiles.Vikhr_M"] = 0
+  local again, second = RH.logistics.ensurePadStock("static1-4")
+  T.ok(not second)
+  T.eq(again.fuelKg, 4000)
+  T.eq(again.missiles["weapons.missiles.AGM_114K"], 12)
+  T.eq(again.missiles["weapons.missiles.AGM_114L"], 7)
+  T.eq(again.missiles["weapons.missiles.Vikhr_M"], 0)
+end)
+
 T.test("a new FARP starts with no crates and general supply is worth five", function()
   setup()
   T.eq(RH.state.farps.RH_FARP_ALPHA.crates, 0)
