@@ -709,25 +709,67 @@ end
 
 -- MASH ------------------------------------------------------------------------
 
+-- Script hospital tents are named "MASH … tent" and use the M92 Tent04. The logistics tent is a FARP tent.
+function logistics.isMashTent(static)
+  local name = string.lower((static and static.name) or "")
+  if string.find(name, "mash", 1, true) then return true end
+  local kind = string.lower(((static and static.typeName) or "") .. " " .. ((static and static.display) or ""))
+  local hospital = string.find(kind, "tent04", 1, true) or string.find(kind, "m92", 1, true)
+  return hospital and string.sub(name, -5) == " tent"
+end
+
+function logistics.mashBlocker(point)
+  local gap = mcfg().minSeparation or 500
+  -- Crates and the helicopter sit on the build point. They are not another object.
+  local ownSite = 80
+  local function consider(name, pos)
+    if not pos or pos.x == nil then return nil end
+    local d = util.distance(pos, point)
+    if d < ownSite or d >= gap then return nil end
+    return name or "an object", d
+  end
+  for name, m in pairs(RH.state.mashes) do
+    local hit, d = consider(name, m)
+    if hit then return hit, d end
+  end
+  for name, farp in pairs(RH.state.farps or {}) do
+    local hit, d = consider(farp.name or name, farp)
+    if hit then return hit, d end
+  end
+  if RH.dcs.staticObjects then
+    for _, static in ipairs(RH.dcs.staticObjects()) do
+      local hit, d = consider(static.name or static.typeName, static)
+      if hit then return hit, d end
+    end
+  end
+  if RH.dcs.unitsInRadius then
+    for _, side in ipairs({ "blue", "red", "neutral" }) do
+      for _, unit in ipairs(RH.dcs.unitsInRadius(side, point, gap) or {}) do
+        local hit, d = consider(unit.name or unit.typeName, unit.pos)
+        if hit then return hit, d end
+      end
+    end
+  end
+end
+
 function logistics.validateMashSite(point)
   if not logistics.inBlueZone(point) then return false, "a MASH must be inside a blue zone" end
-  for name, m in pairs(RH.state.mashes) do
-    local d = util.distance(m, point)
-    if d < mcfg().minSeparation then
-      return false, string.format("%.1f km from %s (needs 16 km)", d / 1000, name)
-    end
+  local name, distance = logistics.mashBlocker(point)
+  if name then
+    local gap = mcfg().minSeparation or 500
+    return false, string.format("%.0f m from %s (needs %d m)", distance, name, gap)
   end
   return true
 end
 
-function logistics.registerMash(name, point)
+function logistics.registerMash(name, point, playerBuilt)
   local existing = RH.state.mashes[name]
   if existing then
-    -- The mission-editor zone wins over a saved position, so moving the zone moves the tent.
     existing.x, existing.y = point.x, point.y
+    if playerBuilt then existing.player = true end
     return existing
   end
-  RH.state.mashes[name] = { x = point.x, y = point.y, patients = 0 }
+  RH.state.mashes[name] = { x = point.x, y = point.y, patients = 0, player = playerBuilt and true or nil }
   return RH.state.mashes[name]
 end
 
@@ -735,10 +777,40 @@ function logistics.buildMash(point, builtBy)
   local ok, reason = logistics.validateMashSite(point)
   if not ok then return nil, reason end
   local name = string.format("MASH %02d", util.count(RH.state.mashes) + 1)
-  logistics.registerMash(name, point)
+  logistics.registerMash(name, point, true)
   RH.dcs.spawnMash(name, point)
   RH.dcs.message("blue", string.format("%s built %s.", builtBy or "A pilot", name), 15)
   return name
+end
+
+-- Editor zones and the save from the old MASH tent are not hospitals. Only a player build is.
+function logistics.spawnPlayerMashes()
+  local keep = {}
+  for name, mash in pairs(RH.state.mashes or {}) do
+    if mash.player then keep[name] = mash end
+  end
+  RH.state.mashes = keep
+  local saved = RH.state.world
+  if saved and saved.objects then
+    local objects = {}
+    for _, obj in ipairs(saved.objects) do
+      if not logistics.isMashTent(obj) then objects[#objects + 1] = obj end
+    end
+    saved.objects = objects
+  end
+  if saved and saved.baseline then
+    for objName in pairs(saved.baseline) do
+      if logistics.isMashTent({ name = objName }) then saved.baseline[objName] = nil end
+    end
+  end
+  if RH.dcs.staticObjects and RH.dcs.destroyStatic then
+    for _, static in ipairs(RH.dcs.staticObjects()) do
+      if logistics.isMashTent(static) then RH.dcs.destroyStatic(static.name) end
+    end
+  end
+  for name, mash in pairs(RH.state.mashes) do
+    RH.dcs.spawnMash(name, mash)
+  end
 end
 
 function logistics.mashAt(point, radius)
@@ -801,12 +873,7 @@ function logistics.start()
   logistics.discoverPlaced()
   logistics.dropStackedFarps()
   logistics.discoverEditorPads()
-  for _, z in ipairs(RH.dcs.zonesWithPrefix(RH.config.prefixes.mash)) do
-    logistics.registerMash(z.name, z.point)
-  end
-  for name, m in pairs(RH.state.mashes) do
-    RH.dcs.spawnMash(name, m)
-  end
+  logistics.spawnPlayerMashes()
   logistics.spawnBuilt()
   logistics.equipEditorFarps()
   logistics.syncPads()

@@ -362,18 +362,61 @@ T.test("cannot build an LC at a red airfield", function()
   T.ok(reason:find("REDFOR"), reason)
 end)
 
-T.test("MASH needs a blue zone and 16 km separation", function()
+T.test("MASH needs a blue zone and 500 m from other objects", function()
   local w = setup()
   w.zones = { { name = "RH_BLUEZONE_WEST", point = { x = 0, y = 0 }, radius = 60000 } }
   local ok, reason = RH.logistics.validateMashSite({ x = 100000, y = 100000 })
   T.eq(ok, false)
   T.ok(reason:find("blue zone"), reason)
   T.ok(RH.logistics.buildMash({ x = 10000, y = 0 }, "Medic"))
-  ok, reason = RH.logistics.validateMashSite({ x = 20000, y = 0 })
+  T.eq(RH.state.mashes["MASH 01"].player, true)
+  ok, reason = RH.logistics.validateMashSite({ x = 10400, y = 0 })
   T.eq(ok, false)
-  T.ok(reason:find("16 km"), reason)
-  T.ok(RH.logistics.buildMash({ x = 30000, y = 0 }, "Medic"))
+  T.ok(reason:find("500"), reason)
+  w.statics.tower = { alive = true, typeName = "house", point = { x = 12000, y = 0 }, side = "blue" }
+  ok, reason = RH.logistics.validateMashSite({ x = 12300, y = 0 })
+  T.eq(ok, false)
+  T.ok(reason:find("tower"), reason)
+  table.insert(w.units, { name = "truck", side = "blue", alive = true, pos = { x = 14000, y = 0 } })
+  ok, reason = RH.logistics.validateMashSite({ x = 14200, y = 0 })
+  T.eq(ok, false)
+  T.ok(reason:find("truck"), reason)
+  -- The kit and the helicopter sit on the build point, so an object inside 80 m does not block it.
+  ok, reason = RH.logistics.validateMashSite({ x = 14050, y = 0 })
+  T.eq(ok, true)
+  T.ok(RH.logistics.buildMash({ x = 10600, y = 0 }, "Medic"))
   T.eq(#w.mashesSpawned, 2)
+end)
+
+T.test("an editor MASH zone is not spawned and its tent is removed", function()
+  local w = setup()
+  w.zones = {
+    { name = "RH_BLUEZONE_WEST", point = { x = 0, y = 0 }, radius = 60000 },
+    { name = "MASH Bassel", point = { x = 0, y = 800 }, radius = 100 },
+  }
+  RH.state.mashes["MASH Bassel"] = { x = 0, y = 800, patients = 4 }
+  RH.state.mashes["MASH 01"] = { x = 10000, y = 0, patients = 2, player = true }
+  w.statics["MASH Bassel tent"] = {
+    alive = true, typeName = "Tent04", display = "M92_Tent04", point = { x = 0, y = 800 }, side = "blue",
+  }
+  w.statics["RH_FARP_Bassel Tent"] = {
+    alive = true, typeName = "FARP Tent", display = "PalatkaB", point = { x = 500, y = 0 }, side = "blue",
+  }
+  RH.state.world = {
+    objects = { { name = "MASH Bassel tent", x = 0, y = 800 } },
+    baseline = { ["MASH Bassel tent"] = true },
+  }
+  RH.logistics.spawnPlayerMashes()
+  T.eq(RH.state.mashes["MASH Bassel"], nil)
+  T.eq(RH.state.mashes["MASH 01"].patients, 2)
+  T.eq(#w.mashesSpawned, 1)
+  T.eq(w.mashesSpawned[1], "MASH 01")
+  T.eq(w.statics["MASH Bassel tent"].alive, false)
+  T.eq(w.statics["RH_FARP_Bassel Tent"].alive, true)
+  T.eq(#RH.state.world.objects, 0)
+  T.eq(RH.state.world.baseline["MASH Bassel tent"], nil)
+  T.ok(RH.world.excluded("MASH Bassel tent"))
+  T.ok(not RH.world.excluded("RH_FARP_Bassel Tent"))
 end)
 
 T.test("MASH capacity and transport tasks", function()
@@ -397,6 +440,8 @@ T.test("FARP crate template is copied from the Humvee so Get crates can list it"
     },
   } } }
   T.ok(RH.ctld.ensureKitTemplate("RH_TPL_BLUE_FARP_KIT"))
+  T.ok(RH.ctld.ensureKitTemplate("RH_TPL_BLUE_MASH_KIT"))
+  T.eq(_DATABASE.Templates.Groups.RH_TPL_BLUE_MASH_KIT.Template.name, "RH_TPL_BLUE_MASH_KIT")
   local kit = _DATABASE.Templates.Groups.RH_TPL_BLUE_FARP_KIT
   T.eq(kit.Template.name, "RH_TPL_BLUE_FARP_KIT")
   T.eq(kit.Template.units[1].name, "tow")

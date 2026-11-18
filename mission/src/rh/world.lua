@@ -31,6 +31,8 @@ function world.excluded(name)
   if name:sub(1, 7) == "RH_TPL_" and not string.find(name, "#", 1, true) and not string.find(name, "%-%d+$") then
     return true
   end
+  -- The hospital tent is spawned from RH.state.mashes. Saving it here put a second tent on the airfield.
+  if RH.logistics and RH.logistics.isMashTent and RH.logistics.isMashTent({ name = name }) then return true end
   return false
 end
 

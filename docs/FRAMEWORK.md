@@ -58,7 +58,11 @@ The editor tent is a CTLD load zone. Troops can always be picked up there. Groun
 
 ### MASH and CSAR
 
-MASH separation is 16 km. A MASH zone in the editor is registered, and the tent is spawned beside it. CSAR uses `RH_TPL_DOWNED_PILOT` and the MOOSE CSAR module. Drop-off is at the MASH.
+A MASH exists only after a player builds the 6-crate MASH kit. An editor zone named `MASH` is not registered. On start, `logistics.spawnPlayerMashes` drops every saved MASH that a player did not build, deletes the hospital tents (including the one the old zone left at the north end of the airfield), and spawns tents only for player MASHes. The logistics tent stays. The world save does not keep hospital tents, because `logistics` spawns them from `RH.state.mashes`.
+
+The site has to be inside a blue zone and at least 500 m from other MASHes, FARPs, statics, and units. The crates and the helicopter on the build point are inside 80 m, so the kit itself does not fail the check. The hospital is a `Tent04` named `<name> tent`. `ctld.ensureKitTemplate` copies `RH_TPL_BLUE_MASH_KIT` when that group is missing, so **FARP AND MASH** lists MASH Crate. Building it calls `logistics.buildMash`.
+
+CSAR uses `RH_TPL_DOWNED_PILOT` and the MOOSE CSAR module. Drop-off is that tent, on the ground, within 150 m. Capacity stays unlimited until transport tasks matter.
 
 ### The rest
 

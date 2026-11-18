@@ -179,6 +179,7 @@ function ctld.create()
     addCrates(v.name, v.template, CTLD_CARGO.Enum.VEHICLE, crates, v.mass, v.subcat)
   end
   ctld.ensureKitTemplate(c.kits.farp.template)
+  ctld.ensureKitTemplate(c.kits.mash.template)
   if c.kits.generalSupply then ctld.ensureKitTemplate(c.kits.generalSupply.template) end
   addCrates(c.kits.farp.name, c.kits.farp.template, CTLD_CARGO.Enum.FOB, c.farp.cratesForFarp, c.farp.farpCrateMass, "FARP AND MASH")
   addCrates(c.kits.mash.name, c.kits.mash.template, CTLD_CARGO.Enum.FOB, c.mash.crates, c.mash.crateMass, "FARP AND MASH")
