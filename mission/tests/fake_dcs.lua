@@ -59,21 +59,6 @@ function fake.new()
   function dcs.isStaticAlive(name) return w.statics[name] ~= nil and w.statics[name].alive end
   function dcs.respawnStatic(info) w.statics[info.name].alive = true end
   function dcs.destroyStatic(name) if w.statics[name] then w.statics[name].alive = false end end
-  function dcs.staticObjects()
-    local out = {}
-    for name, s in pairs(w.statics) do
-      if s.alive then
-        table.insert(out, {
-          name = name,
-          typeName = s.typeName or "",
-          display = s.display or "",
-          x = s.point.x,
-          y = s.point.y,
-        })
-      end
-    end
-    return out
-  end
 
   local function unitsOf(side, point, radius, groundOnly)
     local out = {}

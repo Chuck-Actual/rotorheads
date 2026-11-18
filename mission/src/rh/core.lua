@@ -9,7 +9,6 @@ RH.state = RH.state or {
   outposts = {},
   farps = {},
   mashes = {},
-  redForces = {},
   blueOutposts = {},
   lives = {},
   stats = { restarts = 0 },

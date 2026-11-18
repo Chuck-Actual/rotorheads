@@ -8,12 +8,6 @@ local dcs = { spawners = {}, drawIds = {}, nextDrawId = 70000 }
 RH.dcs = dcs
 
 local SIDES = { [0] = "neutral", [1] = "red", [2] = "blue" }
-local USA = 2
-
-function dcs.blueCountry()
-  if country and country.id and country.id.USA then return country.id.USA end
-  return USA
-end
 local SIDE_IDS = { neutral = 0, red = 1, blue = 2, all = -1 }
 
 local function vec3(p, alt)
@@ -91,7 +85,6 @@ local EVENT_NAMES = {
   [world.event.S_EVENT_EJECTION] = "ejection",
   [world.event.S_EVENT_CRASH] = "crash",
   [world.event.S_EVENT_PLAYER_LEAVE_UNIT] = "playerLeave",
-  [world.event.S_EVENT_PLAYER_ENTER_UNIT] = "playerEnter",
   [world.event.S_EVENT_KILL] = "kill",
   [world.event.S_EVENT_SHOT] = "shot",
   [world.event.S_EVENT_LAND] = "land",
@@ -130,7 +123,6 @@ function dcs.normalize(event)
   if init then
     e.initiatorName, e.initiatorType, e.initiatorCoalition = init.name, init.typeName, init.coalition
     e.initiatorCategory, e.playerName, e.groupId = init.category, init.playerName, init.groupId
-    e.groupName = init.groupName
     e.pos, e.initiatorPos, e.onGround = init.pos, init.pos, init.inAir == false
   elseif event.initiator and event.initiator.getName then
     local okName, name = pcall(event.initiator.getName, event.initiator)
@@ -247,11 +239,8 @@ function dcs.respawnStatic(info)
 end
 
 function dcs.destroyStatic(name)
-  dcs.forgetMooseObject(name)
-  pcall(function()
-    local s = StaticObject.getByName(name)
-    if s and s:isExist() then s:destroy() end
-  end)
+  local s = StaticObject.getByName(name)
+  if s and s:isExist() then s:destroy() end
 end
 
 -- Units and groups ---------------------------------------------------------------
@@ -701,25 +690,11 @@ function dcs.groundRoster()
   return out
 end
 
-function dcs.forgetMooseObject(name)
-  if type(name) ~= "string" or name == "" or not _DATABASE then return end
-  if _DATABASE.GROUPS then _DATABASE.GROUPS[name] = nil end
-  if _DATABASE.UNITS then _DATABASE.UNITS[name] = nil end
-  if _DATABASE.STATICS then _DATABASE.STATICS[name] = nil end
-end
-
 function dcs.destroyNamed(name)
-  -- Drop the MOOSE wrapper first. A destroyed group left in the database makes the next
-  -- menu scan call getCoalition() and DCS throws "Group doesn't exist", which aborts startup.
-  dcs.forgetMooseObject(name)
-  pcall(function()
-    local g = Group.getByName(name)
-    if g and g:isExist() then g:destroy() end
-  end)
-  pcall(function()
-    local s = StaticObject.getByName(name)
-    if s and s:isExist() then s:destroy() end
-  end)
+  local okG, g = pcall(Group.getByName, name)
+  if okG and g and g:isExist() then g:destroy() return end
+  local okS, s = pcall(StaticObject.getByName, name)
+  if okS and s and s:isExist() then s:destroy() end
 end
 
 function dcs.spawnSnapshot(obj)
@@ -742,7 +717,7 @@ function dcs.spawnSnapshot(obj)
       data.heliport_callsign_id = 1
       data.dynamicSpawn = true
     end
-    local ok = pcall(coalition.addStaticObject, obj.country or dcs.blueCountry(), data)
+    local ok = pcall(coalition.addStaticObject, obj.country or country.id.USA, data)
     return ok
   end
   local units = {}
@@ -769,7 +744,7 @@ function dcs.spawnSnapshot(obj)
     units = units,
   }
   local category = obj.kind == "ship" and Group.Category.SHIP or Group.Category.GROUND
-  local ok = pcall(coalition.addGroup, obj.country or dcs.blueCountry(), category, groupData)
+  local ok = pcall(coalition.addGroup, obj.country or country.id.USA, category, groupData)
   return ok
 end
 
@@ -798,48 +773,19 @@ function dcs.spawnVehicle(name, typeName, point, headingDeg)
       },
     },
   }
-  return coalition.addGroup(dcs.blueCountry(), Group.Category.GROUND, groupData)
-end
-
-function dcs.spawnFarpPad(name, point, freq)
-  local vec = util.toVec2(point)
-  for _, static in ipairs(dcs.staticObjects()) do
-    local kind = static.typeName or ""
-    local isPad = kind == "FARP" or kind == "Invisible FARP" or kind == "SINGLE_HELIPAD"
-    if isPad and static.name ~= name and util.distance(static, vec) < 120 then
-      dcs.destroyNamed(static.name)
-    end
-  end
-  dcs.destroyNamed(name)
-  -- This is the static DCS puts in the dynamic-spawn list. addGroup(-1) does not.
-  -- Confirmed after 2.9.21: category Heliports, type FARP, dynamicSpawn true, unitId nil.
-  local data = {
-    category = "Heliports",
-    type = "FARP",
-    shape_name = "FARPS",
-    x = vec.x,
-    y = vec.y,
-    name = name,
-    heading = 0,
-    unitId = nil,
-    dead = false,
-    dynamicSpawn = true,
-    heliport_callsign_id = (CALLSIGN and CALLSIGN.FARP and CALLSIGN.FARP.Berlin) or 1,
-    heliport_frequency = tonumber(freq) or 127.5,
-    heliport_modulation = 0,
-  }
-  local countryId = dcs.blueCountry()
-  local ok, err = pcall(coalition.addStaticObject, countryId, data)
-  dcs.forgetMooseObject(name)
-  if not ok then util.log("FARP pad %s failed: %s", name, tostring(err)) end
-  return ok
+  return coalition.addGroup(country.id.USA, Group.Category.GROUND, groupData)
 end
 
 function dcs.spawnFarp(farp)
   local pad = COORDINATE:NewFromVec2(util.toVec2(farp))
-  -- Replace the pad. An editor pad keeps the mission's unlimited warehouse, and setItem
-  -- cannot clear that flag. A new static starts empty and can be dynamic-spawned.
-  dcs.spawnFarpPad(farp.name, farp, farp.freq)
+  -- A pad restored from the editor copy is already there. Fill its warehouse instead of building a second one.
+  if not dcs.objectExists(farp.name) then
+    local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
+    helipad:InitShape("FARPS")
+    -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
+    helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
+    helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
+  end
   for _, piece in ipairs(RH.config.farp.services or {}) do
     local spot = pad:Translate(piece.dist or 40, piece.bearing or 0)
     local objectName = farp.name .. " " .. piece.label
@@ -848,7 +794,7 @@ function dcs.spawnFarp(farp)
         if piece.kind == "vehicle" then
           dcs.spawnVehicle(objectName, piece.typeName, spot:GetVec2(), piece.heading or 0)
         else
-          local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", dcs.blueCountry())
+          local obj = SPAWNSTATIC:NewFromType(piece.typeName, piece.category or "Fortifications", country.id.USA)
           if piece.shape then obj:InitShape(piece.shape) end
           obj:SpawnFromCoordinate(spot, piece.heading or 0, objectName)
         end
@@ -857,15 +803,12 @@ function dcs.spawnFarp(farp)
     end
   end
   local function fill()
-    local wh = dcs.farpWarehouse(farp.name)
-    if wh then dcs.applyWarehouse(farp, wh) end
+    local warehouse = dcs.farpWarehouse(farp.name)
+    if warehouse then dcs.applyWarehouse(farp, warehouse) end
   end
   fill()
-  if RH.after then
-    RH.after(2, fill)
-    RH.after(10, fill)
-    RH.after(30, fill)
-  end
+  -- The airbase sometimes appears a moment after the pad is created.
+  if RH.after then RH.after(2, fill) end
 end
 
 function dcs.farpWarehouse(name)
@@ -877,86 +820,40 @@ function dcs.farpWarehouse(name)
   return wh
 end
 
--- A new scripted FARP warehouse starts empty. Amounts above zero are what the warehouse
--- API stores. Zero does not turn off an unlimited flag, so it is never written.
-function dcs.eachStorageItem(fn)
-  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
-  if type(weapons) ~= "table" then return end
-  for category, group in pairs(weapons) do
-    if type(group) == "table" then
-      for _, item in pairs(group) do
-        if type(item) == "string" then fn(category, item) end
-      end
+function dcs.applyWarehouse(farp, wh)
+  for key, amount in pairs(farp.liquids or {}) do
+    if type(amount) == "number" and amount > 0 then
+      local id = type(key) == "number" and key or tonumber(key)
+      if id == nil and STORAGE and STORAGE.Liquid then id = STORAGE.Liquid[key] end
+      if id ~= nil then pcall(function() wh:setLiquidAmount(id, amount) end) end
     end
   end
-end
-
-function dcs.limitFarpWarehouse(wh, hauled)
-  if not wh or not wh.setItem then return end
-  if RH.logistics and RH.logistics.farpSupplyCount then
-    dcs.eachStorageItem(function(category, item)
-      local count = RH.logistics.farpSupplyCount(category, item)
-      if type(count) == "number" and count > 0 then
-        pcall(function() wh:setItem(item, count) end)
-      end
-    end)
-  end
-  for item, amount in pairs(hauled or {}) do
-    if RH.logistics and RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
+  for item, amount in pairs(farp.ammoItems or {}) do
+    if type(item) == "string" and type(amount) == "number" and amount > 0 then
       pcall(function() wh:setItem(item, amount) end)
     end
   end
   dcs.topUpAirframes(wh)
-end
-
-function dcs.armFarp(name, hauled)
-  local wh = dcs.farpWarehouse(name)
-  dcs.limitFarpWarehouse(wh, hauled)
-end
-
-function dcs.applyWarehouse(farp, wh)
-  if not wh then return end
-  for key, amount in pairs(farp.liquids or {}) do
-    if type(amount) == "number" and amount > 0 and amount < 1000000 then
-      local id = type(key) == "number" and key or tonumber(key)
-      if id == nil and STORAGE and STORAGE.Liquid then id = STORAGE.Liquid[key] end
-      if id ~= nil and wh.setLiquidAmount then pcall(function() wh:setLiquidAmount(id, amount) end) end
-    end
-  end
-  dcs.limitFarpWarehouse(wh, farp.ammoItems)
+  dcs.seedFarpSupplies(wh)
 end
 
 function dcs.seedFarpSupplies(wh)
-  dcs.limitFarpWarehouse(wh, nil)
-end
-
-function dcs.limitPlayerFarpWarehouses()
-  if not dcs.airbases or not RH.state or not RH.state.farps then return end
-  for _, ab in ipairs(dcs.airbases()) do
-    if ab.kind ~= "ship" and ab.coalition ~= "red" then
-      local farp = RH.state.farps[ab.name]
-      if not farp then
-        for _, candidate in pairs(RH.state.farps) do
-          if util.distance(candidate, ab.point) < 400 then farp = candidate break end
-        end
-      end
-      if farp or ab.kind == "helipad" then
-        if farp then dcs.applyWarehouse(farp, dcs.farpWarehouse(ab.name))
-        else dcs.seedFarpSupplies(dcs.farpWarehouse(ab.name)) end
+  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
+  if not weapons or not RH.logistics or not RH.logistics.farpSupplyCount then return end
+  for category, group in pairs(weapons) do
+    if type(group) == "table" then
+      for _, item in pairs(group) do
+        local count = RH.logistics.farpSupplyCount(category, item)
+        if count then pcall(function() wh:setItem(item, count) end) end
       end
     end
   end
 end
 
 function dcs.topUpAirframes(wh)
-  if not wh or not wh.setItem then return end
   for typeName in pairs(RH.config.airframes or {}) do
     local count = RH.logistics.farpAirframeCount(typeName)
-    -- Fixed wing stays off the shelf. Writing 0 does not remove it, and on an unlimited
-    -- warehouse it leaves the type listed.
-    if type(count) == "number" and count > 0 then
-      pcall(function() wh:setItem(typeName, count) end)
-    end
+    pcall(function() wh:setItem(typeName, count) end)
   end
 end
 
@@ -966,11 +863,7 @@ function dcs.captureFarpStock(farp)
   if not wh or not wh.getInventory then return false end
   local ok, inv = pcall(function() return wh:getInventory() end)
   if not ok or type(inv) ~= "table" then return false end
-  local liquids = {}
-  for key, amount in pairs(inv.liquids or {}) do
-    if type(amount) == "number" and amount > 0 and amount < 1000000 then liquids[key] = amount end
-  end
-  farp.liquids = liquids
+  farp.liquids = inv.liquids or {}
   local kept = {}
   for item, amount in pairs(inv.weapon or inv.weapons or {}) do
     if RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
@@ -982,40 +875,9 @@ function dcs.captureFarpStock(farp)
   return true
 end
 
-function dcs.spawnSamBattery(name, pieces)
-  if type(pieces) ~= "table" or #pieces == 0 or not coalition or not coalition.addGroup then return false end
-  dcs.destroyNamed(name)
-  local units = {}
-  for i, piece in ipairs(pieces) do
-    units[i] = {
-      type = piece.type,
-      name = string.format("%s %d", name, i),
-      skill = "Excellent",
-      x = piece.x,
-      y = piece.y,
-      heading = piece.heading or 0,
-      playerCanDrive = false,
-    }
-  end
-  local groupData = {
-    visible = true,
-    hidden = false,
-    task = "Ground Nothing",
-    name = name,
-    x = units[1].x,
-    y = units[1].y,
-    route = { points = { { x = units[1].x, y = units[1].y, type = "Off Road", action = "Off Road", speed = 0 } } },
-    units = units,
-  }
-  local ok, err = pcall(coalition.addGroup, dcs.blueCountry(), Group.Category.GROUND, groupData)
-  if not ok then util.log("SAM battery %s failed: %s", name, tostring(err)) end
-  return ok
-end
-
 function dcs.spawnMash(name, point)
-  if dcs.objectExists(name .. " tent") then return end
   local c = COORDINATE:NewFromVec2(util.toVec2(point))
-  local tent = SPAWNSTATIC:NewFromType("Tent04", "Fortifications", dcs.blueCountry())
+  local tent = SPAWNSTATIC:NewFromType("Tent04", "Fortifications", country.id.USA)
   tent:InitShape("M92_Tent04")
   tent:SpawnFromCoordinate(c, 0, name .. " tent")
 end

@@ -106,34 +106,6 @@ T.test("an uncaptured destroyed factory is rebuilt on restart", function()
   T.eq(RH.factories.status(RH.factories.list[1]), "active")
 end)
 
-T.test("red garrisons come back where they were after a restart", function()
-  local w = setup()
-  local names = groupsWithAlias(w, "Garrison")
-  T.ok(#names >= 1)
-  w.groups[names[1]].pos = { x = 1234, y = 5678 }
-  RH.factories.syncLive()
-  local saved = RH.util.serialize(RH.state)
-
-  local w2 = T.fresh()
-  w2.zones = w.zones
-  w2.statics.hall1 = { side = "red", point = { x = 50, y = 0 }, alive = true }
-  w2.statics.hall2 = { side = "red", point = { x = -50, y = 0 }, alive = true }
-  w2.files["save/campaign.lua"] = saved
-  RH.persistence.load()
-  RH.outposts.start()
-  RH.factories.start()
-  local found = false
-  for _, g in pairs(w2.groups) do
-    if g.alive > 0 and g.pos.x == 1234 and g.pos.y == 5678 then found = true end
-  end
-  T.ok(found, "the garrison is restored at its saved position")
-  local alive = 0
-  for _, g in pairs(w2.groups) do
-    if g.alive > 0 and g.alias:sub(1, 8) == "Garrison" then alive = alive + 1 end
-  end
-  T.eq(alive, 2 * RH.config.area.garrisonGroups, "restored groups fill the garrison, they are not added again")
-end)
-
 T.test("factories are revealed only when a blue unit is within 5 km", function()
   local w = setup()
   w.advance(31)

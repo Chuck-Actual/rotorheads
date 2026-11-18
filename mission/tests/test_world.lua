@@ -83,6 +83,5 @@ T.test("world capture records a runtime Humvee and keeps the editor baseline", f
   T.eq(origins["Shed"], "baseline")
   T.eq(origins["RH_TPL_BLUE_HMMWV_TOW#001"], "runtime")
   T.eq(origins["Garrison North"], nil)
-  T.ok(RH.world.excluded("MASH 01 tent"))
   T.ok(w.files["save/world.lua"]:find("HMMWV"))
 end)

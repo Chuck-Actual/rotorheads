@@ -140,8 +140,7 @@ RH.config = {
   mash = {
     crates = 6,
     crateMass = 400,
-    -- Same 1 mile gap as a FARP while the MASH sites are being tested.
-    minSeparation = 1609.344,
+    minSeparation = 16000,
     -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
     capacity = 9999,
     -- Drop off rescued pilots within this distance of the hospital tent.
@@ -180,20 +179,20 @@ RH.config = {
   -- Troop squads. Bigger squads only appear usable to airframes that can carry them (CTLD enforces trooplimit).
   -- Each entry needs a late-activated blue infantry group in the Mission Editor with the template name.
   troops = {
-    { name = "Infantry (12)", template = "RH_TPL_BLUE_INF_STD_12", size = 12 },
-    { name = "Infantry (6)", template = "RH_TPL_BLUE_INF_STD_6", size = 6 },
-    { name = "Anti-Tank (12)", template = "RH_TPL_BLUE_INF_AT_12", size = 12 },
-    { name = "Anti-Tank (6)", template = "RH_TPL_BLUE_INF_AT_6", size = 6 },
-    { name = "Anti-Tank (2)", template = "RH_TPL_BLUE_INF_AT_2", size = 2 },
-    { name = "Anti-Air (12)", template = "RH_TPL_BLUE_INF_AA_12", size = 12 },
-    { name = "Anti-Air (6)", template = "RH_TPL_BLUE_INF_AA_6", size = 6 },
-    { name = "Anti-Air (2)", template = "RH_TPL_BLUE_INF_AA_2", size = 2 },
-    { name = "Mortar (10)", template = "RH_TPL_BLUE_INF_MORTAR_10", size = 10 },
-    { name = "Mortar (6)", template = "RH_TPL_BLUE_INF_MORTAR_6", size = 6 },
-    { name = "JTAC (6)", template = "RH_TPL_BLUE_INF_JTAC_6", size = 6 },
-    { name = "JTAC (2)", template = "RH_TPL_BLUE_INF_JTAC_2", size = 2 },
-    { name = "Special Ops (6)", template = "RH_TPL_BLUE_INF_SOF_6", size = 6 },
-    { name = "Special Ops (4)", template = "RH_TPL_BLUE_INF_SOF_4", size = 4 },
+    { name = "Standard (12)", template = "RH_TPL_BLUE_INF_STD_12", size = 12, subcat = "Infantry" },
+    { name = "Standard (6)", template = "RH_TPL_BLUE_INF_STD_6", size = 6, subcat = "Infantry" },
+    { name = "Anti-Tank (12)", template = "RH_TPL_BLUE_INF_AT_12", size = 12, subcat = "Anti-Tank" },
+    { name = "Anti-Tank (6)", template = "RH_TPL_BLUE_INF_AT_6", size = 6, subcat = "Anti-Tank" },
+    { name = "Anti-Tank (2)", template = "RH_TPL_BLUE_INF_AT_2", size = 2, subcat = "Anti-Tank" },
+    { name = "Anti-Air (12)", template = "RH_TPL_BLUE_INF_AA_12", size = 12, subcat = "Anti-Air" },
+    { name = "Anti-Air (6)", template = "RH_TPL_BLUE_INF_AA_6", size = 6, subcat = "Anti-Air" },
+    { name = "Anti-Air (2)", template = "RH_TPL_BLUE_INF_AA_2", size = 2, subcat = "Anti-Air" },
+    { name = "Mortar (10)", template = "RH_TPL_BLUE_INF_MORTAR_10", size = 10, subcat = "Mortar" },
+    { name = "Mortar (6)", template = "RH_TPL_BLUE_INF_MORTAR_6", size = 6, subcat = "Mortar" },
+    { name = "JTAC (6)", template = "RH_TPL_BLUE_INF_JTAC_6", size = 6, subcat = "JTAC" },
+    { name = "JTAC (2)", template = "RH_TPL_BLUE_INF_JTAC_2", size = 2, subcat = "JTAC" },
+    { name = "Special Ops (6)", template = "RH_TPL_BLUE_INF_SOF_6", size = 6, subcat = "Special Ops" },
+    { name = "Special Ops (4)", template = "RH_TPL_BLUE_INF_SOF_4", size = 4, subcat = "Special Ops" },
   },
 
   -- Ground model for every CTLD crate. This is the C-130J CDS box, the one a Hercules loads 22 of.
@@ -201,8 +200,6 @@ RH.config = {
 
   -- Vehicle crates. `crates` is how many small CDS crates must sit within 50 m before Build works.
   -- `mass` is kg per crate. A Humvee is four crates. A Chinook (6 internal) can lift one in a single trip.
-  -- Testing override. Set this to nil to use the real crate counts above.
-  testVehicleCrates = 1,
   vehicles = {
     { name = "M1045 HMMWV TOW", template = "RH_TPL_BLUE_HMMWV_TOW", crates = 4, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
     { name = "M1043 HMMWV MG", template = "RH_TPL_BLUE_HMMWV_MG", crates = 2, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
