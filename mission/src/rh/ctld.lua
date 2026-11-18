@@ -66,6 +66,16 @@ function ctld.ensureKitTemplate(name)
   return true
 end
 
+-- One click spawns either the whole set or a single crate, so a second trip can finish a vehicle.
+function ctld.crateChoices(needed)
+  needed = math.max(1, math.floor(tonumber(needed) or 1))
+  if needed == 1 then return { { label = "Get", count = 1 } } end
+  return {
+    { label = string.format("All %d crates", needed), count = needed },
+    { label = "1 crate", count = 1 },
+  }
+end
+
 function ctld.buildPoint(unit)
   if not unit or not unit.IsAlive or not unit:IsAlive() then return nil end
   local heading = unit:GetHeading() or 0
@@ -159,7 +169,8 @@ function ctld.create()
   end
 
   for _, t in ipairs(c.troops) do
-    inst:AddTroopsCargo(t.name, { t.template }, CTLD_CARGO.Enum.TROOPS, t.size, c.troopWeight, nil, t.subcat)
+    -- No subcategory: Load troops lists the squad, and clicking that name loads it.
+    inst:AddTroopsCargo(t.name, { t.template }, CTLD_CARGO.Enum.TROOPS, t.size, c.troopWeight, nil, nil)
   end
   local function addCrates(name, template, kind, crates, mass, subcat)
     inst:AddCratesCargo(name, { template }, kind, crates, mass, nil, subcat, nil, nil, nil, "Cargos", inst.basetype, nil, inst.basetype)
@@ -197,6 +208,7 @@ function ctld.create()
   end
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)
+  ctld.installMenus(inst)
   inst:__Start(2)
   -- Once the world snapshot exists it restores vehicles and crates itself. Loading CTLD's
   -- csv as well would build a second copy. The first run still reads the csv, so a Humvee
@@ -207,16 +219,52 @@ function ctld.create()
   return inst
 end
 
--- Put a freshly built vehicle 10 m behind the tail, facing the same way as the helicopter.
-function ctld.placeBehind(group, pilot)
-  if not group or not pilot or not group:IsAlive() or not pilot:IsAlive() then return end
-  local heading = pilot:GetHeading() or 0
-  local airframe = RH.config.airframes[pilot:GetTypeName()]
-  local length = airframe and airframe.length or 15
-  local dest = pilot:GetCoordinate():Translate(length / 2 + 10, (heading + 180) % 360)
-  group:InitZone(dest)
-  group:InitHeading(heading)
-  group:Respawn(nil, true)
+function ctld.installMenus(inst)
+  local refresh = inst._RefreshF10Menus
+  function inst:_AddCrateQuantityMenus(Group, Unit, parentMenu, cargoObj)
+    local needed = cargoObj.GetCratesNeeded and cargoObj:GetCratesNeeded() or 1
+    for _, choice in ipairs(ctld.crateChoices(needed)) do
+      MENU_GROUP_COMMAND:New(Group, choice.label, parentMenu, self._GetCrates, self, Group, Unit, cargoObj, choice.count, false, false)
+    end
+    return self
+  end
+  function inst:_RefreshF10Menus()
+    local already = {}
+    for name in pairs(self.MenusDone or {}) do already[name] = true end
+    refresh(self)
+    for name in pairs(self.CtldUnits or {}) do
+      if not already[name] then ctld.flattenTroopMenu(self, name) end
+    end
+  end
+end
+
+-- MOOSE puts a "1" under every squad. Clicking the squad name loads that one squad.
+function ctld.flattenTroopMenu(inst, unitName)
+  if not UNIT or not UNIT.FindByName then return end
+  local unit = UNIT:FindByName(unitName)
+  local group = unit and unit.GetGroup and unit:GetGroup()
+  if not group then return end
+  group.RHReturnCrates = nil
+  local menus = group.CTLD_TroopMenus
+  if menus then
+    for name, menu in pairs(menus) do
+      local cargo = inst._FindTroopsCargoObject and inst:_FindTroopsCargoObject(name)
+      local owner = menu.MenuParent or menu.ParentMenu
+      local text = menu.MenuText or name
+      if menu.Remove then menu:Remove() end
+      if cargo and owner and MENU_GROUP_COMMAND then
+        MENU_GROUP_COMMAND:New(group, text, owner, inst._LoadTroops, inst, group, unit, cargo)
+      end
+    end
+    group.CTLD_TroopMenus = nil
+  end
+  local crates = group.MyTopCratesMenu
+  if crates and not group.RHReturnCrates and MENU_GROUP_COMMAND then
+    MENU_GROUP_COMMAND:New(group, "Return crates to tent", crates, function()
+      if inst._RemoveCratesNearby then inst:_RemoveCratesNearby(group, unit) end
+    end)
+    group.RHReturnCrates = true
+  end
 end
 
 function ctld.installHooks(inst)
@@ -239,18 +287,21 @@ function ctld.installHooks(inst)
   end
 
   function inst:OnAfterRemoveCratesNearby(From, Event, To, Group, Unit, Cargotable)
-    local farp = Unit and RH.logistics.farpAt(Unit:GetVec2())
-    if farp and Cargotable then
-      local worth = 0
-      for _, cargo in pairs(Cargotable) do
-        local name = cargo.GetName and cargo:GetName() or ""
-        worth = worth + RH.logistics.crateWorth(name)
-      end
-      local added = RH.logistics.returnCrates(farp, worth)
-      if added > 0 then
-        ctld.reply(Group, string.format("%d crates returned to %s stock (now %s).", added, farp.name,
-          RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
-      end
+    local point = Unit and Unit.GetVec2 and Unit:GetVec2()
+    local farp = point and RH.logistics.farpAt(point, 500)
+    if not farp or not Cargotable then
+      ctld.reply(Group, "Crates removed. Land within 500 m of a FARP or logistics tent to add them to that stock.")
+      return
+    end
+    local worth = 0
+    for _, cargo in pairs(Cargotable) do
+      local name = cargo.GetName and cargo:GetName() or ""
+      worth = worth + RH.logistics.crateWorth(name)
+    end
+    local added = RH.logistics.returnCrates(farp, worth)
+    if added > 0 then
+      ctld.reply(Group, string.format("%d crates returned to %s (now %s).", added, farp.name,
+        RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
     end
   end
 
@@ -273,7 +324,7 @@ function ctld.installHooks(inst)
 
   function inst:OnAfterCratesBuildStarted(From, Event, To, Group, Unit, cargoName)
     if cargoName ~= RH.config.kits.farp.name then return end
-    local point = ctld.buildPoint(Unit) or (Unit and Unit.GetVec2 and Unit:GetVec2())
+    local point = Unit and Unit.GetVec2 and Unit:GetVec2()
     if not point then return end
     local player = Unit and Unit.GetPlayerName and Unit:GetPlayerName() or "A pilot"
     local farp, reason = RH.logistics.buildFarp(point, player)
@@ -283,13 +334,10 @@ function ctld.installHooks(inst)
   function inst:OnAfterCratesBuild(From, Event, To, Group, Unit, Vehicle)
     if not Group or not Vehicle then return end
     local kit = templateKit(Vehicle:GetName())
-    if not kit then
-      ctld.placeBehind(Vehicle, Unit)
-      return
-    end
+    -- Leave the unit on the crate it was built from. Moving every build behind the helicopter
+    -- stacked a radar, a CP, and a launcher on the same spot.
+    if not kit then return end
     local point = Vehicle:GetVec2()
-    local behind = ctld.buildPoint(Unit)
-    if behind then point = behind end
     local player = Unit and Unit:GetPlayerName() or "A pilot"
     local ok, reason
     if kit == "farp" then

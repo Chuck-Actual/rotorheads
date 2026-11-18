@@ -331,7 +331,8 @@ RH.config = {
   mash = {
     crates = 6,
     crateMass = 400,
-    minSeparation = 16000,
+    -- Same 1 mile gap as a FARP while the MASH sites are being tested.
+    minSeparation = 1609.344,
     -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
     capacity = 9999,
     -- Drop off rescued pilots within this distance of the hospital tent.
@@ -370,20 +371,20 @@ RH.config = {
   -- Troop squads. Bigger squads only appear usable to airframes that can carry them (CTLD enforces trooplimit).
   -- Each entry needs a late-activated blue infantry group in the Mission Editor with the template name.
   troops = {
-    { name = "Standard (12)", template = "RH_TPL_BLUE_INF_STD_12", size = 12, subcat = "Infantry" },
-    { name = "Standard (6)", template = "RH_TPL_BLUE_INF_STD_6", size = 6, subcat = "Infantry" },
-    { name = "Anti-Tank (12)", template = "RH_TPL_BLUE_INF_AT_12", size = 12, subcat = "Anti-Tank" },
-    { name = "Anti-Tank (6)", template = "RH_TPL_BLUE_INF_AT_6", size = 6, subcat = "Anti-Tank" },
-    { name = "Anti-Tank (2)", template = "RH_TPL_BLUE_INF_AT_2", size = 2, subcat = "Anti-Tank" },
-    { name = "Anti-Air (12)", template = "RH_TPL_BLUE_INF_AA_12", size = 12, subcat = "Anti-Air" },
-    { name = "Anti-Air (6)", template = "RH_TPL_BLUE_INF_AA_6", size = 6, subcat = "Anti-Air" },
-    { name = "Anti-Air (2)", template = "RH_TPL_BLUE_INF_AA_2", size = 2, subcat = "Anti-Air" },
-    { name = "Mortar (10)", template = "RH_TPL_BLUE_INF_MORTAR_10", size = 10, subcat = "Mortar" },
-    { name = "Mortar (6)", template = "RH_TPL_BLUE_INF_MORTAR_6", size = 6, subcat = "Mortar" },
-    { name = "JTAC (6)", template = "RH_TPL_BLUE_INF_JTAC_6", size = 6, subcat = "JTAC" },
-    { name = "JTAC (2)", template = "RH_TPL_BLUE_INF_JTAC_2", size = 2, subcat = "JTAC" },
-    { name = "Special Ops (6)", template = "RH_TPL_BLUE_INF_SOF_6", size = 6, subcat = "Special Ops" },
-    { name = "Special Ops (4)", template = "RH_TPL_BLUE_INF_SOF_4", size = 4, subcat = "Special Ops" },
+    { name = "Infantry (12)", template = "RH_TPL_BLUE_INF_STD_12", size = 12 },
+    { name = "Infantry (6)", template = "RH_TPL_BLUE_INF_STD_6", size = 6 },
+    { name = "Anti-Tank (12)", template = "RH_TPL_BLUE_INF_AT_12", size = 12 },
+    { name = "Anti-Tank (6)", template = "RH_TPL_BLUE_INF_AT_6", size = 6 },
+    { name = "Anti-Tank (2)", template = "RH_TPL_BLUE_INF_AT_2", size = 2 },
+    { name = "Anti-Air (12)", template = "RH_TPL_BLUE_INF_AA_12", size = 12 },
+    { name = "Anti-Air (6)", template = "RH_TPL_BLUE_INF_AA_6", size = 6 },
+    { name = "Anti-Air (2)", template = "RH_TPL_BLUE_INF_AA_2", size = 2 },
+    { name = "Mortar (10)", template = "RH_TPL_BLUE_INF_MORTAR_10", size = 10 },
+    { name = "Mortar (6)", template = "RH_TPL_BLUE_INF_MORTAR_6", size = 6 },
+    { name = "JTAC (6)", template = "RH_TPL_BLUE_INF_JTAC_6", size = 6 },
+    { name = "JTAC (2)", template = "RH_TPL_BLUE_INF_JTAC_2", size = 2 },
+    { name = "Special Ops (6)", template = "RH_TPL_BLUE_INF_SOF_6", size = 6 },
+    { name = "Special Ops (4)", template = "RH_TPL_BLUE_INF_SOF_4", size = 4 },
   },
 
   -- Ground model for every CTLD crate. This is the C-130J CDS box, the one a Hercules loads 22 of.
@@ -506,6 +507,7 @@ RH.state = RH.state or {
   outposts = {},
   farps = {},
   mashes = {},
+  redForces = {},
   blueOutposts = {},
   lives = {},
   stats = { restarts = 0 },
@@ -1430,32 +1432,48 @@ function dcs.farpWarehouse(name)
   return wh
 end
 
-function dcs.applyWarehouse(farp, wh)
-  for key, amount in pairs(farp.liquids or {}) do
-    if type(amount) == "number" and amount > 0 then
-      local id = type(key) == "number" and key or tonumber(key)
-      if id == nil and STORAGE and STORAGE.Liquid then id = STORAGE.Liquid[key] end
-      if id ~= nil then pcall(function() wh:setLiquidAmount(id, amount) end) end
+-- A scripted FARP warehouse starts unlimited. Zero fuel and every weapon, then put back
+-- only the helicopter shelf (guns, rockets, air-to-air) plus missiles the players hauled in.
+function dcs.limitFarpWarehouse(wh, hauled)
+  if not wh or not wh.setLiquidAmount then return end
+  for liquid = 0, 3 do
+    pcall(function() wh:setLiquidAmount(liquid, 0) end)
+  end
+  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
+  if weapons and RH.logistics and RH.logistics.farpSupplyCount then
+    for category, group in pairs(weapons) do
+      if type(group) == "table" then
+        for _, item in pairs(group) do
+          if type(item) == "string" then
+            local count = RH.logistics.farpSupplyCount(category, item) or 0
+            pcall(function() wh:setItem(item, count) end)
+          end
+        end
+      end
     end
   end
-  for item, amount in pairs(farp.ammoItems or {}) do
-    if type(item) == "string" and type(amount) == "number" and amount > 0 then
+  for item, amount in pairs(hauled or {}) do
+    if RH.logistics and RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
       pcall(function() wh:setItem(item, amount) end)
     end
   end
   dcs.topUpAirframes(wh)
-  dcs.seedFarpSupplies(wh)
+end
+
+function dcs.applyWarehouse(farp, wh)
+  dcs.limitFarpWarehouse(wh, farp.ammoItems)
 end
 
 function dcs.seedFarpSupplies(wh)
-  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
-  if not weapons or not RH.logistics or not RH.logistics.farpSupplyCount then return end
-  for category, group in pairs(weapons) do
-    if type(group) == "table" then
-      for _, item in pairs(group) do
-        local count = RH.logistics.farpSupplyCount(category, item)
-        if count then pcall(function() wh:setItem(item, count) end) end
-      end
+  dcs.limitFarpWarehouse(wh, nil)
+end
+
+function dcs.limitPlayerFarpWarehouses()
+  if not dcs.airbases then return end
+  for _, ab in ipairs(dcs.airbases()) do
+    if ab.kind == "helipad" and ab.coalition ~= "red" then
+      local farp = RH.state and RH.state.farps and RH.state.farps[ab.name]
+      dcs.limitFarpWarehouse(dcs.farpWarehouse(ab.name), farp and farp.ammoItems)
     end
   end
 end
@@ -1473,7 +1491,7 @@ function dcs.captureFarpStock(farp)
   if not wh or not wh.getInventory then return false end
   local ok, inv = pcall(function() return wh:getInventory() end)
   if not ok or type(inv) ~= "table" then return false end
-  farp.liquids = inv.liquids or {}
+  farp.liquids = nil
   local kept = {}
   for item, amount in pairs(inv.weapon or inv.weapons or {}) do
     if RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
@@ -1486,6 +1504,7 @@ function dcs.captureFarpStock(farp)
 end
 
 function dcs.spawnMash(name, point)
+  if dcs.objectExists(name .. " tent") then return end
   local c = COORDINATE:NewFromVec2(util.toVec2(point))
   local tent = SPAWNSTATIC:NewFromType("Tent04", "Fortifications", country.id.USA)
   tent:InitShape("M92_Tent04")
@@ -1883,20 +1902,32 @@ function logistics.crateWorth(name)
   return 1
 end
 
+function logistics.labelPoint(farp)
+  local tents = farp.loadPoints
+  if type(tents) == "table" and tents[1] and tents[1].x then return tents[1] end
+  return farp
+end
+
 function logistics.refreshMapLabels()
   if not RH.dcs.drawLabel then return end
   for _, farp in ipairs(logistics.farps()) do
+    local where = logistics.labelPoint(farp)
     if farp.pending then
-      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, farp.name .. "\nbuilds on next restart")
+      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", where, farp.name .. "\nbuilds on next restart")
     else
       local crates = logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
-      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, string.format("%s\nCrates: %s", farp.name, crates))
+      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", where, string.format("%s\nCrates: %s", farp.name, crates))
     end
   end
 end
 
 function logistics.returnCrates(farp, n)
-  if logistics.hasUnlimitedCrates(farp) then return 0 end
+  n = math.max(0, math.floor(tonumber(n) or 0))
+  if n == 0 then return 0 end
+  if logistics.hasUnlimitedCrates(farp) then
+    logistics.refreshMapLabels()
+    return n
+  end
   local space = fcfg().maxCrates - farp.crates
   local added = math.max(0, math.min(space, n))
   farp.crates = farp.crates + added
@@ -2012,11 +2043,13 @@ function logistics.spawnBuilt()
 end
 
 function logistics.captureStocks()
-  if not RH.dcs.captureFarpStock then return end
-  for name in pairs(logistics.sessionSpawned or {}) do
-    local farp = RH.state.farps[name]
-    if farp then RH.dcs.captureFarpStock(farp) end
+  if RH.dcs.captureFarpStock then
+    for name in pairs(logistics.sessionSpawned or {}) do
+      local farp = RH.state.farps[name]
+      if farp then RH.dcs.captureFarpStock(farp) end
+    end
   end
+  if RH.dcs.limitPlayerFarpWarehouses then RH.dcs.limitPlayerFarpWarehouses() end
 end
 
 -- Aircraft air-to-air only. Anything else in the missile list is air-to-ground, a decoy, or a SAM.
@@ -2212,7 +2245,7 @@ function logistics.validateMashSite(point)
   for name, m in pairs(RH.state.mashes) do
     local d = util.distance(m, point)
     if d < mcfg().minSeparation then
-      return false, string.format("%.1f km from %s (needs 16 km)", d / 1000, name)
+      return false, string.format("%.2f miles from %s (needs 1 mile)", d / mcfg().minSeparation, name)
     end
   end
   return true
@@ -2225,7 +2258,7 @@ function logistics.registerMash(name, point)
     existing.x, existing.y = point.x, point.y
     return existing
   end
-  RH.state.mashes[name] = { x = point.x, y = point.y, patients = 0 }
+  RH.state.mashes[name] = { x = point.x, y = point.y, patients = 0, player = false }
   return RH.state.mashes[name]
 end
 
@@ -2234,6 +2267,7 @@ function logistics.buildMash(point, builtBy)
   if not ok then return nil, reason end
   local name = string.format("MASH %02d", util.count(RH.state.mashes) + 1)
   logistics.registerMash(name, point)
+  RH.state.mashes[name].player = true
   RH.dcs.spawnMash(name, point)
   RH.dcs.message("blue", string.format("%s built %s.", builtBy or "A pilot", name), 15)
   return name
@@ -2297,13 +2331,12 @@ end
 
 function logistics.start()
   logistics.discoverPlaced()
-  for _, z in ipairs(RH.dcs.zonesWithPrefix(RH.config.prefixes.mash)) do
-    logistics.registerMash(z.name, z.point)
-  end
+  -- MASHes are player-built. A zone or tent left in the mission editor is not spawned.
   for name, m in pairs(RH.state.mashes) do
-    RH.dcs.spawnMash(name, m)
+    if m.player then RH.dcs.spawnMash(name, m) end
   end
   logistics.spawnBuilt()
+  if RH.dcs.limitPlayerFarpWarehouses then RH.dcs.limitPlayerFarpWarehouses() end
   logistics.refreshMapLabels()
   RH.every(30, logistics.refreshMapLabels)
   -- Fuel and ammo change while people are flying. Write them down often, not only every five minutes.
@@ -2593,14 +2626,92 @@ local function pruneGroups(groups)
   return alive
 end
 
+function factories.areaByName(name)
+  for _, area in ipairs(factories.areas) do
+    if area.name == name then return area end
+  end
+end
+
+-- Live red ground units. The world snapshot skips them so they are not spawned twice.
+function factories.track(name, template, point, meta)
+  if not name or not template then return end
+  RH.state.redForces = RH.state.redForces or {}
+  meta = meta or {}
+  RH.state.redForces[name] = {
+    name = name,
+    template = template,
+    x = point.x,
+    y = point.y,
+    dest = meta.dest,
+    onRoad = meta.onRoad,
+    area = meta.area,
+    factory = meta.factory,
+    role = meta.role,
+  }
+end
+
+function factories.shouldKeep(rec)
+  if rec.role == "factory" then
+    local f = rec.factory and factories.byName[rec.factory]
+    return not f or factories.status(f) ~= "captured"
+  end
+  local area = rec.area and factories.areaByName(rec.area)
+  if not area then return false end
+  if not factories.areaHeld(area) or not factories.supplierFor(area) then return false end
+  return true
+end
+
+function factories.syncLive()
+  local kept = {}
+  for name, rec in pairs(RH.state.redForces or {}) do
+    if RH.dcs.groupAliveCount(name) > 0 then
+      local pos = RH.dcs.groupPosition(name)
+      if pos then rec.x, rec.y = pos.x, pos.y end
+      kept[name] = rec
+    end
+  end
+  RH.state.redForces = kept
+end
+
+function factories.restoreForces()
+  local saved = RH.state.redForces or {}
+  RH.state.redForces = {}
+  for _, rec in pairs(saved) do
+    if rec.template and rec.x and factories.shouldKeep(rec) then
+      local name = RH.dcs.spawnGroup(rec.template, { x = rec.x, y = rec.y }, rec.name or "Red")
+      if name then
+        if rec.dest then RH.dcs.routeGroup(name, rec.dest, rec.onRoad ~= false) end
+        factories.track(name, rec.template, { x = rec.x, y = rec.y }, rec)
+        local area = rec.area and factories.areaByName(rec.area)
+        if area and rec.role ~= "factory" then table.insert(area.groups, name) end
+        local f = rec.factory and factories.byName[rec.factory]
+        if f and rec.role == "convoy" then table.insert(f.convoys, name) end
+      end
+    end
+  end
+end
+
+function factories.aliveIn(groups)
+  local n = 0
+  for _, g in ipairs(groups or {}) do
+    if RH.dcs.groupAliveCount(g) > 0 then n = n + 1 end
+  end
+  return n
+end
+
 function factories.spawnGarrisons()
   local tpl = RH.config.templates.garrison
   for _, area in ipairs(factories.areas) do
     if factories.areaHeld(area) and factories.supplierFor(area) then
-      for i = 1, RH.config.area.garrisonGroups do
+      local have = factories.aliveIn(area.groups)
+      for _ = have + 1, RH.config.area.garrisonGroups do
+        local template = tpl[math.random(#tpl)]
         local p = util.randomPointInCircle(area.point, area.radius * 0.8)
-        local g = RH.dcs.spawnGroup(tpl[math.random(#tpl)], p, "Garrison " .. area.name)
-        if g then table.insert(area.groups, g) end
+        local g = RH.dcs.spawnGroup(template, p, "Garrison " .. area.name)
+        if g then
+          table.insert(area.groups, g)
+          factories.track(g, template, p, { role = "garrison", area = area.name })
+        end
       end
     end
   end
@@ -2625,10 +2736,13 @@ function factories.reinforce(f, now)
   if not target then return end
 
   local tpl = RH.config.templates.reinforcements
+  local template = tpl[math.random(#tpl)]
   local spawnPoint = util.randomPointInCircle(f.point, math.max(100, f.radius * 0.5))
-  local g = RH.dcs.spawnGroup(tpl[math.random(#tpl)], spawnPoint, "Convoy " .. f.label)
+  local dest = util.randomPointInCircle(target.point, target.radius * 0.7)
+  local g = RH.dcs.spawnGroup(template, spawnPoint, "Convoy " .. f.label)
   if not g then return end
-  RH.dcs.routeGroup(g, util.randomPointInCircle(target.point, target.radius * 0.7), true)
+  RH.dcs.routeGroup(g, dest, true)
+  factories.track(g, template, spawnPoint, { role = "convoy", area = target.name, factory = f.name, dest = dest, onRoad = true })
   table.insert(f.convoys, g)
   table.insert(target.groups, g)
 end
@@ -2658,7 +2772,9 @@ function factories.repair(f)
   for _, s in ipairs(f.statics) do RH.dcs.respawnStatic(s) end
   st.status = "active"
   st.captureHeld = nil
-  RH.dcs.spawnGroup(RH.config.templates.factoryTroops, util.randomPointInCircle(f.point, 150), "Factory troops " .. f.label)
+  local troops = util.randomPointInCircle(f.point, 150)
+  local troopName = RH.dcs.spawnGroup(RH.config.templates.factoryTroops, troops, "Factory troops " .. f.label)
+  if troopName then factories.track(troopName, RH.config.templates.factoryTroops, troops, { role = "factory", factory = f.name }) end
   RH.dcs.message("all", string.format("REDFOR Mi-26 reached factory %s. The factory has been repaired.", f.label), 15)
 end
 
@@ -2709,6 +2825,7 @@ function factories.updateVisibility(f)
 end
 
 function factories.tick()
+  factories.syncLive()
   local now = RH.dcs.now()
   for _, f in ipairs(factories.list) do
     local status = factories.status(f)
@@ -2733,6 +2850,7 @@ end
 function factories.start()
   factories.discover()
   factories.applySavedState()
+  factories.restoreForces()
   factories.spawnGarrisons()
   RH.events.on("dead", factories.onDead)
   RH.every(30, factories.tick, 10)
@@ -3491,6 +3609,16 @@ function ctld.ensureKitTemplate(name)
   return true
 end
 
+-- One click spawns either the whole set or a single crate, so a second trip can finish a vehicle.
+function ctld.crateChoices(needed)
+  needed = math.max(1, math.floor(tonumber(needed) or 1))
+  if needed == 1 then return { { label = "Get", count = 1 } } end
+  return {
+    { label = string.format("All %d crates", needed), count = needed },
+    { label = "1 crate", count = 1 },
+  }
+end
+
 function ctld.buildPoint(unit)
   if not unit or not unit.IsAlive or not unit:IsAlive() then return nil end
   local heading = unit:GetHeading() or 0
@@ -3584,7 +3712,8 @@ function ctld.create()
   end
 
   for _, t in ipairs(c.troops) do
-    inst:AddTroopsCargo(t.name, { t.template }, CTLD_CARGO.Enum.TROOPS, t.size, c.troopWeight, nil, t.subcat)
+    -- No subcategory: Load troops lists the squad, and clicking that name loads it.
+    inst:AddTroopsCargo(t.name, { t.template }, CTLD_CARGO.Enum.TROOPS, t.size, c.troopWeight, nil, nil)
   end
   local function addCrates(name, template, kind, crates, mass, subcat)
     inst:AddCratesCargo(name, { template }, kind, crates, mass, nil, subcat, nil, nil, nil, "Cargos", inst.basetype, nil, inst.basetype)
@@ -3622,6 +3751,7 @@ function ctld.create()
   end
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)
+  ctld.installMenus(inst)
   inst:__Start(2)
   -- Once the world snapshot exists it restores vehicles and crates itself. Loading CTLD's
   -- csv as well would build a second copy. The first run still reads the csv, so a Humvee
@@ -3632,16 +3762,52 @@ function ctld.create()
   return inst
 end
 
--- Put a freshly built vehicle 10 m behind the tail, facing the same way as the helicopter.
-function ctld.placeBehind(group, pilot)
-  if not group or not pilot or not group:IsAlive() or not pilot:IsAlive() then return end
-  local heading = pilot:GetHeading() or 0
-  local airframe = RH.config.airframes[pilot:GetTypeName()]
-  local length = airframe and airframe.length or 15
-  local dest = pilot:GetCoordinate():Translate(length / 2 + 10, (heading + 180) % 360)
-  group:InitZone(dest)
-  group:InitHeading(heading)
-  group:Respawn(nil, true)
+function ctld.installMenus(inst)
+  local refresh = inst._RefreshF10Menus
+  function inst:_AddCrateQuantityMenus(Group, Unit, parentMenu, cargoObj)
+    local needed = cargoObj.GetCratesNeeded and cargoObj:GetCratesNeeded() or 1
+    for _, choice in ipairs(ctld.crateChoices(needed)) do
+      MENU_GROUP_COMMAND:New(Group, choice.label, parentMenu, self._GetCrates, self, Group, Unit, cargoObj, choice.count, false, false)
+    end
+    return self
+  end
+  function inst:_RefreshF10Menus()
+    local already = {}
+    for name in pairs(self.MenusDone or {}) do already[name] = true end
+    refresh(self)
+    for name in pairs(self.CtldUnits or {}) do
+      if not already[name] then ctld.flattenTroopMenu(self, name) end
+    end
+  end
+end
+
+-- MOOSE puts a "1" under every squad. Clicking the squad name loads that one squad.
+function ctld.flattenTroopMenu(inst, unitName)
+  if not UNIT or not UNIT.FindByName then return end
+  local unit = UNIT:FindByName(unitName)
+  local group = unit and unit.GetGroup and unit:GetGroup()
+  if not group then return end
+  group.RHReturnCrates = nil
+  local menus = group.CTLD_TroopMenus
+  if menus then
+    for name, menu in pairs(menus) do
+      local cargo = inst._FindTroopsCargoObject and inst:_FindTroopsCargoObject(name)
+      local owner = menu.MenuParent or menu.ParentMenu
+      local text = menu.MenuText or name
+      if menu.Remove then menu:Remove() end
+      if cargo and owner and MENU_GROUP_COMMAND then
+        MENU_GROUP_COMMAND:New(group, text, owner, inst._LoadTroops, inst, group, unit, cargo)
+      end
+    end
+    group.CTLD_TroopMenus = nil
+  end
+  local crates = group.MyTopCratesMenu
+  if crates and not group.RHReturnCrates and MENU_GROUP_COMMAND then
+    MENU_GROUP_COMMAND:New(group, "Return crates to tent", crates, function()
+      if inst._RemoveCratesNearby then inst:_RemoveCratesNearby(group, unit) end
+    end)
+    group.RHReturnCrates = true
+  end
 end
 
 function ctld.installHooks(inst)
@@ -3664,18 +3830,21 @@ function ctld.installHooks(inst)
   end
 
   function inst:OnAfterRemoveCratesNearby(From, Event, To, Group, Unit, Cargotable)
-    local farp = Unit and RH.logistics.farpAt(Unit:GetVec2())
-    if farp and Cargotable then
-      local worth = 0
-      for _, cargo in pairs(Cargotable) do
-        local name = cargo.GetName and cargo:GetName() or ""
-        worth = worth + RH.logistics.crateWorth(name)
-      end
-      local added = RH.logistics.returnCrates(farp, worth)
-      if added > 0 then
-        ctld.reply(Group, string.format("%d crates returned to %s stock (now %s).", added, farp.name,
-          RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
-      end
+    local point = Unit and Unit.GetVec2 and Unit:GetVec2()
+    local farp = point and RH.logistics.farpAt(point, 500)
+    if not farp or not Cargotable then
+      ctld.reply(Group, "Crates removed. Land within 500 m of a FARP or logistics tent to add them to that stock.")
+      return
+    end
+    local worth = 0
+    for _, cargo in pairs(Cargotable) do
+      local name = cargo.GetName and cargo:GetName() or ""
+      worth = worth + RH.logistics.crateWorth(name)
+    end
+    local added = RH.logistics.returnCrates(farp, worth)
+    if added > 0 then
+      ctld.reply(Group, string.format("%d crates returned to %s (now %s).", added, farp.name,
+        RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
     end
   end
 
@@ -3698,7 +3867,7 @@ function ctld.installHooks(inst)
 
   function inst:OnAfterCratesBuildStarted(From, Event, To, Group, Unit, cargoName)
     if cargoName ~= RH.config.kits.farp.name then return end
-    local point = ctld.buildPoint(Unit) or (Unit and Unit.GetVec2 and Unit:GetVec2())
+    local point = Unit and Unit.GetVec2 and Unit:GetVec2()
     if not point then return end
     local player = Unit and Unit.GetPlayerName and Unit:GetPlayerName() or "A pilot"
     local farp, reason = RH.logistics.buildFarp(point, player)
@@ -3708,13 +3877,10 @@ function ctld.installHooks(inst)
   function inst:OnAfterCratesBuild(From, Event, To, Group, Unit, Vehicle)
     if not Group or not Vehicle then return end
     local kit = templateKit(Vehicle:GetName())
-    if not kit then
-      ctld.placeBehind(Vehicle, Unit)
-      return
-    end
+    -- Leave the unit on the crate it was built from. Moving every build behind the helicopter
+    -- stacked a radar, a CP, and a launcher on the same spot.
+    if not kit then return end
     local point = Vehicle:GetVec2()
-    local behind = ctld.buildPoint(Unit)
-    if behind then point = behind end
     local player = Unit and Unit:GetPlayerName() or "A pilot"
     local ok, reason
     if kit == "farp" then

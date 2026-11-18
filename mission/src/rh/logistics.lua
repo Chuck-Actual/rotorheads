@@ -127,20 +127,32 @@ function logistics.crateWorth(name)
   return 1
 end
 
+function logistics.labelPoint(farp)
+  local tents = farp.loadPoints
+  if type(tents) == "table" and tents[1] and tents[1].x then return tents[1] end
+  return farp
+end
+
 function logistics.refreshMapLabels()
   if not RH.dcs.drawLabel then return end
   for _, farp in ipairs(logistics.farps()) do
+    local where = logistics.labelPoint(farp)
     if farp.pending then
-      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, farp.name .. "\nbuilds on next restart")
+      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", where, farp.name .. "\nbuilds on next restart")
     else
       local crates = logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
-      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, string.format("%s\nCrates: %s", farp.name, crates))
+      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", where, string.format("%s\nCrates: %s", farp.name, crates))
     end
   end
 end
 
 function logistics.returnCrates(farp, n)
-  if logistics.hasUnlimitedCrates(farp) then return 0 end
+  n = math.max(0, math.floor(tonumber(n) or 0))
+  if n == 0 then return 0 end
+  if logistics.hasUnlimitedCrates(farp) then
+    logistics.refreshMapLabels()
+    return n
+  end
   local space = fcfg().maxCrates - farp.crates
   local added = math.max(0, math.min(space, n))
   farp.crates = farp.crates + added
@@ -256,11 +268,13 @@ function logistics.spawnBuilt()
 end
 
 function logistics.captureStocks()
-  if not RH.dcs.captureFarpStock then return end
-  for name in pairs(logistics.sessionSpawned or {}) do
-    local farp = RH.state.farps[name]
-    if farp then RH.dcs.captureFarpStock(farp) end
+  if RH.dcs.captureFarpStock then
+    for name in pairs(logistics.sessionSpawned or {}) do
+      local farp = RH.state.farps[name]
+      if farp then RH.dcs.captureFarpStock(farp) end
+    end
   end
+  if RH.dcs.limitPlayerFarpWarehouses then RH.dcs.limitPlayerFarpWarehouses() end
 end
 
 -- Aircraft air-to-air only. Anything else in the missile list is air-to-ground, a decoy, or a SAM.
@@ -456,7 +470,7 @@ function logistics.validateMashSite(point)
   for name, m in pairs(RH.state.mashes) do
     local d = util.distance(m, point)
     if d < mcfg().minSeparation then
-      return false, string.format("%.1f km from %s (needs 16 km)", d / 1000, name)
+      return false, string.format("%.2f miles from %s (needs 1 mile)", d / mcfg().minSeparation, name)
     end
   end
   return true
@@ -469,7 +483,7 @@ function logistics.registerMash(name, point)
     existing.x, existing.y = point.x, point.y
     return existing
   end
-  RH.state.mashes[name] = { x = point.x, y = point.y, patients = 0 }
+  RH.state.mashes[name] = { x = point.x, y = point.y, patients = 0, player = false }
   return RH.state.mashes[name]
 end
 
@@ -478,6 +492,7 @@ function logistics.buildMash(point, builtBy)
   if not ok then return nil, reason end
   local name = string.format("MASH %02d", util.count(RH.state.mashes) + 1)
   logistics.registerMash(name, point)
+  RH.state.mashes[name].player = true
   RH.dcs.spawnMash(name, point)
   RH.dcs.message("blue", string.format("%s built %s.", builtBy or "A pilot", name), 15)
   return name
@@ -541,13 +556,12 @@ end
 
 function logistics.start()
   logistics.discoverPlaced()
-  for _, z in ipairs(RH.dcs.zonesWithPrefix(RH.config.prefixes.mash)) do
-    logistics.registerMash(z.name, z.point)
-  end
+  -- MASHes are player-built. A zone or tent left in the mission editor is not spawned.
   for name, m in pairs(RH.state.mashes) do
-    RH.dcs.spawnMash(name, m)
+    if m.player then RH.dcs.spawnMash(name, m) end
   end
   logistics.spawnBuilt()
+  if RH.dcs.limitPlayerFarpWarehouses then RH.dcs.limitPlayerFarpWarehouses() end
   logistics.refreshMapLabels()
   RH.every(30, logistics.refreshMapLabels)
   -- Fuel and ammo change while people are flying. Write them down often, not only every five minutes.

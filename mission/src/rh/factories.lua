@@ -94,14 +94,92 @@ local function pruneGroups(groups)
   return alive
 end
 
+function factories.areaByName(name)
+  for _, area in ipairs(factories.areas) do
+    if area.name == name then return area end
+  end
+end
+
+-- Live red ground units. The world snapshot skips them so they are not spawned twice.
+function factories.track(name, template, point, meta)
+  if not name or not template then return end
+  RH.state.redForces = RH.state.redForces or {}
+  meta = meta or {}
+  RH.state.redForces[name] = {
+    name = name,
+    template = template,
+    x = point.x,
+    y = point.y,
+    dest = meta.dest,
+    onRoad = meta.onRoad,
+    area = meta.area,
+    factory = meta.factory,
+    role = meta.role,
+  }
+end
+
+function factories.shouldKeep(rec)
+  if rec.role == "factory" then
+    local f = rec.factory and factories.byName[rec.factory]
+    return not f or factories.status(f) ~= "captured"
+  end
+  local area = rec.area and factories.areaByName(rec.area)
+  if not area then return false end
+  if not factories.areaHeld(area) or not factories.supplierFor(area) then return false end
+  return true
+end
+
+function factories.syncLive()
+  local kept = {}
+  for name, rec in pairs(RH.state.redForces or {}) do
+    if RH.dcs.groupAliveCount(name) > 0 then
+      local pos = RH.dcs.groupPosition(name)
+      if pos then rec.x, rec.y = pos.x, pos.y end
+      kept[name] = rec
+    end
+  end
+  RH.state.redForces = kept
+end
+
+function factories.restoreForces()
+  local saved = RH.state.redForces or {}
+  RH.state.redForces = {}
+  for _, rec in pairs(saved) do
+    if rec.template and rec.x and factories.shouldKeep(rec) then
+      local name = RH.dcs.spawnGroup(rec.template, { x = rec.x, y = rec.y }, rec.name or "Red")
+      if name then
+        if rec.dest then RH.dcs.routeGroup(name, rec.dest, rec.onRoad ~= false) end
+        factories.track(name, rec.template, { x = rec.x, y = rec.y }, rec)
+        local area = rec.area and factories.areaByName(rec.area)
+        if area and rec.role ~= "factory" then table.insert(area.groups, name) end
+        local f = rec.factory and factories.byName[rec.factory]
+        if f and rec.role == "convoy" then table.insert(f.convoys, name) end
+      end
+    end
+  end
+end
+
+function factories.aliveIn(groups)
+  local n = 0
+  for _, g in ipairs(groups or {}) do
+    if RH.dcs.groupAliveCount(g) > 0 then n = n + 1 end
+  end
+  return n
+end
+
 function factories.spawnGarrisons()
   local tpl = RH.config.templates.garrison
   for _, area in ipairs(factories.areas) do
     if factories.areaHeld(area) and factories.supplierFor(area) then
-      for i = 1, RH.config.area.garrisonGroups do
+      local have = factories.aliveIn(area.groups)
+      for _ = have + 1, RH.config.area.garrisonGroups do
+        local template = tpl[math.random(#tpl)]
         local p = util.randomPointInCircle(area.point, area.radius * 0.8)
-        local g = RH.dcs.spawnGroup(tpl[math.random(#tpl)], p, "Garrison " .. area.name)
-        if g then table.insert(area.groups, g) end
+        local g = RH.dcs.spawnGroup(template, p, "Garrison " .. area.name)
+        if g then
+          table.insert(area.groups, g)
+          factories.track(g, template, p, { role = "garrison", area = area.name })
+        end
       end
     end
   end
@@ -126,10 +204,13 @@ function factories.reinforce(f, now)
   if not target then return end
 
   local tpl = RH.config.templates.reinforcements
+  local template = tpl[math.random(#tpl)]
   local spawnPoint = util.randomPointInCircle(f.point, math.max(100, f.radius * 0.5))
-  local g = RH.dcs.spawnGroup(tpl[math.random(#tpl)], spawnPoint, "Convoy " .. f.label)
+  local dest = util.randomPointInCircle(target.point, target.radius * 0.7)
+  local g = RH.dcs.spawnGroup(template, spawnPoint, "Convoy " .. f.label)
   if not g then return end
-  RH.dcs.routeGroup(g, util.randomPointInCircle(target.point, target.radius * 0.7), true)
+  RH.dcs.routeGroup(g, dest, true)
+  factories.track(g, template, spawnPoint, { role = "convoy", area = target.name, factory = f.name, dest = dest, onRoad = true })
   table.insert(f.convoys, g)
   table.insert(target.groups, g)
 end
@@ -159,7 +240,9 @@ function factories.repair(f)
   for _, s in ipairs(f.statics) do RH.dcs.respawnStatic(s) end
   st.status = "active"
   st.captureHeld = nil
-  RH.dcs.spawnGroup(RH.config.templates.factoryTroops, util.randomPointInCircle(f.point, 150), "Factory troops " .. f.label)
+  local troops = util.randomPointInCircle(f.point, 150)
+  local troopName = RH.dcs.spawnGroup(RH.config.templates.factoryTroops, troops, "Factory troops " .. f.label)
+  if troopName then factories.track(troopName, RH.config.templates.factoryTroops, troops, { role = "factory", factory = f.name }) end
   RH.dcs.message("all", string.format("REDFOR Mi-26 reached factory %s. The factory has been repaired.", f.label), 15)
 end
 
@@ -210,6 +293,7 @@ function factories.updateVisibility(f)
 end
 
 function factories.tick()
+  factories.syncLive()
   local now = RH.dcs.now()
   for _, f in ipairs(factories.list) do
     local status = factories.status(f)
@@ -234,6 +318,7 @@ end
 function factories.start()
   factories.discover()
   factories.applySavedState()
+  factories.restoreForces()
   factories.spawnGarrisons()
   RH.events.on("dead", factories.onDead)
   RH.every(30, factories.tick, 10)

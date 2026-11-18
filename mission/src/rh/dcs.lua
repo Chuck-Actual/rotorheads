@@ -820,32 +820,48 @@ function dcs.farpWarehouse(name)
   return wh
 end
 
-function dcs.applyWarehouse(farp, wh)
-  for key, amount in pairs(farp.liquids or {}) do
-    if type(amount) == "number" and amount > 0 then
-      local id = type(key) == "number" and key or tonumber(key)
-      if id == nil and STORAGE and STORAGE.Liquid then id = STORAGE.Liquid[key] end
-      if id ~= nil then pcall(function() wh:setLiquidAmount(id, amount) end) end
+-- A scripted FARP warehouse starts unlimited. Zero fuel and every weapon, then put back
+-- only the helicopter shelf (guns, rockets, air-to-air) plus missiles the players hauled in.
+function dcs.limitFarpWarehouse(wh, hauled)
+  if not wh or not wh.setLiquidAmount then return end
+  for liquid = 0, 3 do
+    pcall(function() wh:setLiquidAmount(liquid, 0) end)
+  end
+  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
+  if weapons and RH.logistics and RH.logistics.farpSupplyCount then
+    for category, group in pairs(weapons) do
+      if type(group) == "table" then
+        for _, item in pairs(group) do
+          if type(item) == "string" then
+            local count = RH.logistics.farpSupplyCount(category, item) or 0
+            pcall(function() wh:setItem(item, count) end)
+          end
+        end
+      end
     end
   end
-  for item, amount in pairs(farp.ammoItems or {}) do
-    if type(item) == "string" and type(amount) == "number" and amount > 0 then
+  for item, amount in pairs(hauled or {}) do
+    if RH.logistics and RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
       pcall(function() wh:setItem(item, amount) end)
     end
   end
   dcs.topUpAirframes(wh)
-  dcs.seedFarpSupplies(wh)
+end
+
+function dcs.applyWarehouse(farp, wh)
+  dcs.limitFarpWarehouse(wh, farp.ammoItems)
 end
 
 function dcs.seedFarpSupplies(wh)
-  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
-  if not weapons or not RH.logistics or not RH.logistics.farpSupplyCount then return end
-  for category, group in pairs(weapons) do
-    if type(group) == "table" then
-      for _, item in pairs(group) do
-        local count = RH.logistics.farpSupplyCount(category, item)
-        if count then pcall(function() wh:setItem(item, count) end) end
-      end
+  dcs.limitFarpWarehouse(wh, nil)
+end
+
+function dcs.limitPlayerFarpWarehouses()
+  if not dcs.airbases then return end
+  for _, ab in ipairs(dcs.airbases()) do
+    if ab.kind == "helipad" and ab.coalition ~= "red" then
+      local farp = RH.state and RH.state.farps and RH.state.farps[ab.name]
+      dcs.limitFarpWarehouse(dcs.farpWarehouse(ab.name), farp and farp.ammoItems)
     end
   end
 end
@@ -863,7 +879,7 @@ function dcs.captureFarpStock(farp)
   if not wh or not wh.getInventory then return false end
   local ok, inv = pcall(function() return wh:getInventory() end)
   if not ok or type(inv) ~= "table" then return false end
-  farp.liquids = inv.liquids or {}
+  farp.liquids = nil
   local kept = {}
   for item, amount in pairs(inv.weapon or inv.weapons or {}) do
     if RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
@@ -876,6 +892,7 @@ function dcs.captureFarpStock(farp)
 end
 
 function dcs.spawnMash(name, point)
+  if dcs.objectExists(name .. " tent") then return end
   local c = COORDINATE:NewFromVec2(util.toVec2(point))
   local tent = SPAWNSTATIC:NewFromType("Tent04", "Fortifications", country.id.USA)
   tent:InitShape("M92_Tent04")
