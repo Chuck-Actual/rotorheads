@@ -529,6 +529,16 @@ function dcs.removeDrawing(id)
   dcs.drawIds[id] = nil
 end
 
+function dcs.drawLabel(id, side, point, text)
+  dcs.removeDrawing(id)
+  local sideId = SIDE_IDS[side] or -1
+  local textId = dcs.nextDrawId
+  dcs.nextDrawId = dcs.nextDrawId + 1
+  local spot = util.toVec2(point)
+  trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.45 }, 14, true, text)
+  dcs.drawIds[id] = { textId }
+end
+
 function dcs.drawCircle(id, side, point, radius, lineColor, fillColor, text)
   dcs.removeDrawing(id)
   local sideId = SIDE_IDS[side] or -1

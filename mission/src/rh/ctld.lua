@@ -172,6 +172,12 @@ function ctld.create()
   addCrates(c.kits.mash.name, c.kits.mash.template, CTLD_CARGO.Enum.FOB, c.mash.crates, c.mash.crateMass, "Construction")
   addCrates(c.kits.outpost.name, c.kits.outpost.template, CTLD_CARGO.Enum.FOB, c.kits.outpost.crates, c.kits.outpost.mass, "Construction")
   addCrates(c.kits.uhRepair.name, c.kits.uhRepair.template, CTLD_CARGO.Enum.FOB, c.kits.uhRepair.crates, c.kits.uhRepair.mass, "Construction")
+  local supply = c.kits.generalSupply
+  if supply then
+    for _, batch in ipairs(supply.batches) do
+      addCrates(supply.name .. " x" .. batch, supply.template, CTLD_CARGO.Enum.VEHICLE, batch, supply.mass, "Supply")
+    end
+  end
 
   for _, ship in ipairs(c.ships) do
     if UNIT:FindByName(ship.unit) then
@@ -218,9 +224,10 @@ function ctld.installHooks(inst)
   function inst:CanGetCrates(Group, Unit, Cargo, number)
     local farp = RH.logistics.farpAt(Unit:GetVec2())
     if not farp then return true end
-    local kit = kitName(Cargo:GetName())
-    if kit == "farp" and not RH.logistics.hasUnlimitedCrates(farp) then
-      ctld.reply(Group, "FARP crates are only available at Logistics Centers and ships.")
+    local cargoName = Cargo:GetName()
+    local kit = kitName(cargoName)
+    if (kit == "farp" or RH.logistics.isGeneralSupply(cargoName)) and not RH.logistics.hasUnlimitedCrates(farp) then
+      ctld.reply(Group, "General supply and FARP crates are only available at Logistics Centers and ships.")
       return false
     end
     local count = tonumber(number) or Cargo:GetCratesNeeded() or 1
@@ -234,7 +241,12 @@ function ctld.installHooks(inst)
   function inst:OnAfterRemoveCratesNearby(From, Event, To, Group, Unit, Cargotable)
     local farp = Unit and RH.logistics.farpAt(Unit:GetVec2())
     if farp and Cargotable then
-      local added = RH.logistics.returnCrates(farp, #Cargotable)
+      local worth = 0
+      for _, cargo in pairs(Cargotable) do
+        local name = cargo.GetName and cargo:GetName() or ""
+        worth = worth + RH.logistics.crateWorth(name)
+      end
+      local added = RH.logistics.returnCrates(farp, worth)
       if added > 0 then
         ctld.reply(Group, string.format("%d crates returned to %s stock (now %s).", added, farp.name,
           RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
@@ -250,6 +262,15 @@ function ctld.installHooks(inst)
 
   -- Mark the FARP when the countdown starts. The placeholder vehicle spawn can fail, and
   -- waiting for it is what left the last site unsaved.
+  function inst:OnBeforeCratesBuild(From, Event, To, Group, Unit, cargoName)
+    if type(cargoName) == "table" and cargoName.GetName then cargoName = cargoName:GetName() end
+    if RH.logistics.isGeneralSupply(cargoName) then
+      ctld.reply(Group, "General supply crates are not built. Land at a FARP tent and use Return crates. Each one adds 5 to that FARP.")
+      return false
+    end
+    return true
+  end
+
   function inst:OnAfterCratesBuildStarted(From, Event, To, Group, Unit, cargoName)
     if cargoName ~= RH.config.kits.farp.name then return end
     local point = ctld.buildPoint(Unit) or (Unit and Unit.GetVec2 and Unit:GetVec2())

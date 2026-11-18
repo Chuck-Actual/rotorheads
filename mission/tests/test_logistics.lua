@@ -12,16 +12,24 @@ local function setup()
   return w
 end
 
+T.test("a new FARP starts with no crates and general supply is worth five", function()
+  setup()
+  T.eq(RH.state.farps.RH_FARP_ALPHA.crates, 0)
+  T.eq(RH.logistics.crateWorth("General supply x10"), 5)
+  T.eq(RH.logistics.crateWorth("Humvee TOW"), 1)
+  T.ok(not RH.logistics.takeCrates(RH.state.farps.RH_FARP_ALPHA, 1))
+end)
+
 T.test("FARP stock is consumed and refilled up to the cap", function()
   setup()
   local farp = RH.state.farps.RH_FARP_ALPHA
-  T.eq(farp.crates, RH.config.farp.startingCrates)
+  farp.crates = 40
   T.ok(RH.logistics.takeCrates(farp, 10))
-  T.eq(farp.crates, RH.config.farp.startingCrates - 10)
+  T.eq(farp.crates, 30)
   T.ok(not RH.logistics.takeCrates(farp, 1000), "cannot take more than stock")
   local added = RH.logistics.returnCrates(farp, 1000)
   T.eq(farp.crates, RH.config.farp.maxCrates)
-  T.eq(added, RH.config.farp.maxCrates - (RH.config.farp.startingCrates - 10))
+  T.eq(added, RH.config.farp.maxCrates - 30)
 end)
 
 T.test("Logistics Centers have unlimited crates", function()

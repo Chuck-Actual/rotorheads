@@ -295,7 +295,7 @@ RH.config = {
     lcAirfieldRadius = 1 * 1852,
     -- A tent already placed on the airfield is the Logistics Center even if the zone sits off the beacon.
     placedLcRadius = 5 * 1852,
-    startingCrates = 40,
+    startingCrates = 0,
     maxCrates = 80,
     zoneRadius = 250,
     -- Crates and troops load within this distance of the logistics tent.
@@ -418,6 +418,9 @@ RH.config = {
     mash = { name = "MASH crate", template = "RH_TPL_BLUE_MASH_KIT" },
     outpost = { name = "Outpost crate", template = "RH_TPL_BLUE_OUTPOST_KIT", crates = 2, mass = 800 },
     uhRepair = { name = "UH Repair kit", template = "RH_TPL_BLUE_UHREPAIR_KIT", crates = 1, mass = 300, lifetime = 1800 },
+    -- One physical general-supply crate. Returned at a FARP tent it adds `worth` to that FARP's count.
+    -- The logistics menu offers batches of 1, 5, and 10 of these crates. Logistics Centers only.
+    generalSupply = { name = "General supply", template = "RH_TPL_BLUE_FARP_KIT", worth = 5, batches = { 1, 5, 10 }, mass = 400 },
   },
 
   -- Troops weigh 100 kg each (wiki). Internal crate counts are the wiki "Carry Capacity" table.
@@ -1109,6 +1112,16 @@ function dcs.removeDrawing(id)
   if not ids then return end
   for _, n in ipairs(ids) do trigger.action.removeMark(n) end
   dcs.drawIds[id] = nil
+end
+
+function dcs.drawLabel(id, side, point, text)
+  dcs.removeDrawing(id)
+  local sideId = SIDE_IDS[side] or -1
+  local textId = dcs.nextDrawId
+  dcs.nextDrawId = dcs.nextDrawId + 1
+  local spot = util.toVec2(point)
+  trigger.action.textToAll(sideId, textId, vec3(spot), { 1, 1, 1, 1 }, { 0, 0, 0, 0.45 }, 14, true, text)
+  dcs.drawIds[id] = { textId }
 end
 
 function dcs.drawCircle(id, side, point, radius, lineColor, fillColor, text)
@@ -1831,7 +1844,30 @@ function logistics.takeCrates(farp, n)
   if logistics.hasUnlimitedCrates(farp) then return true end
   if farp.crates < n then return false end
   farp.crates = farp.crates - n
+  logistics.refreshMapLabels()
   return true
+end
+
+function logistics.isGeneralSupply(name)
+  return type(name) == "string" and name:sub(1, #"General supply") == "General supply"
+end
+
+-- A normal crate returned at a tent is worth 1. A general-supply crate is worth 5, per the wiki.
+function logistics.crateWorth(name)
+  if logistics.isGeneralSupply(name) then return fcfg().generalSupplyWorth or RH.config.kits.generalSupply.worth or 5 end
+  return 1
+end
+
+function logistics.refreshMapLabels()
+  if not RH.dcs.drawLabel then return end
+  for _, farp in ipairs(logistics.farps()) do
+    if farp.pending then
+      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, farp.name .. "\nbuilds on next restart")
+    else
+      local crates = logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
+      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, string.format("%s\nCrates: %s", farp.name, crates))
+    end
+  end
 end
 
 function logistics.returnCrates(farp, n)
@@ -1839,6 +1875,7 @@ function logistics.returnCrates(farp, n)
   local space = fcfg().maxCrates - farp.crates
   local added = math.max(0, math.min(space, n))
   farp.crates = farp.crates + added
+  logistics.refreshMapLabels()
   return added
 end
 
@@ -2242,6 +2279,8 @@ function logistics.start()
     RH.dcs.spawnMash(name, m)
   end
   logistics.spawnBuilt()
+  logistics.refreshMapLabels()
+  RH.every(30, logistics.refreshMapLabels)
   -- Fuel and ammo change while people are flying. Write them down often, not only every five minutes.
   RH.every(30, function()
     if RH.persistence and RH.persistence.save then RH.persistence.save() end
@@ -3533,6 +3572,12 @@ function ctld.create()
   addCrates(c.kits.mash.name, c.kits.mash.template, CTLD_CARGO.Enum.FOB, c.mash.crates, c.mash.crateMass, "Construction")
   addCrates(c.kits.outpost.name, c.kits.outpost.template, CTLD_CARGO.Enum.FOB, c.kits.outpost.crates, c.kits.outpost.mass, "Construction")
   addCrates(c.kits.uhRepair.name, c.kits.uhRepair.template, CTLD_CARGO.Enum.FOB, c.kits.uhRepair.crates, c.kits.uhRepair.mass, "Construction")
+  local supply = c.kits.generalSupply
+  if supply then
+    for _, batch in ipairs(supply.batches) do
+      addCrates(supply.name .. " x" .. batch, supply.template, CTLD_CARGO.Enum.VEHICLE, batch, supply.mass, "Supply")
+    end
+  end
 
   for _, ship in ipairs(c.ships) do
     if UNIT:FindByName(ship.unit) then
@@ -3579,9 +3624,10 @@ function ctld.installHooks(inst)
   function inst:CanGetCrates(Group, Unit, Cargo, number)
     local farp = RH.logistics.farpAt(Unit:GetVec2())
     if not farp then return true end
-    local kit = kitName(Cargo:GetName())
-    if kit == "farp" and not RH.logistics.hasUnlimitedCrates(farp) then
-      ctld.reply(Group, "FARP crates are only available at Logistics Centers and ships.")
+    local cargoName = Cargo:GetName()
+    local kit = kitName(cargoName)
+    if (kit == "farp" or RH.logistics.isGeneralSupply(cargoName)) and not RH.logistics.hasUnlimitedCrates(farp) then
+      ctld.reply(Group, "General supply and FARP crates are only available at Logistics Centers and ships.")
       return false
     end
     local count = tonumber(number) or Cargo:GetCratesNeeded() or 1
@@ -3595,7 +3641,12 @@ function ctld.installHooks(inst)
   function inst:OnAfterRemoveCratesNearby(From, Event, To, Group, Unit, Cargotable)
     local farp = Unit and RH.logistics.farpAt(Unit:GetVec2())
     if farp and Cargotable then
-      local added = RH.logistics.returnCrates(farp, #Cargotable)
+      local worth = 0
+      for _, cargo in pairs(Cargotable) do
+        local name = cargo.GetName and cargo:GetName() or ""
+        worth = worth + RH.logistics.crateWorth(name)
+      end
+      local added = RH.logistics.returnCrates(farp, worth)
       if added > 0 then
         ctld.reply(Group, string.format("%d crates returned to %s stock (now %s).", added, farp.name,
           RH.logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates)))
@@ -3611,6 +3662,15 @@ function ctld.installHooks(inst)
 
   -- Mark the FARP when the countdown starts. The placeholder vehicle spawn can fail, and
   -- waiting for it is what left the last site unsaved.
+  function inst:OnBeforeCratesBuild(From, Event, To, Group, Unit, cargoName)
+    if type(cargoName) == "table" and cargoName.GetName then cargoName = cargoName:GetName() end
+    if RH.logistics.isGeneralSupply(cargoName) then
+      ctld.reply(Group, "General supply crates are not built. Land at a FARP tent and use Return crates. Each one adds 5 to that FARP.")
+      return false
+    end
+    return true
+  end
+
   function inst:OnAfterCratesBuildStarted(From, Event, To, Group, Unit, cargoName)
     if cargoName ~= RH.config.kits.farp.name then return end
     local point = ctld.buildPoint(Unit) or (Unit and Unit.GetVec2 and Unit:GetVec2())

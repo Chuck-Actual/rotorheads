@@ -113,7 +113,30 @@ function logistics.takeCrates(farp, n)
   if logistics.hasUnlimitedCrates(farp) then return true end
   if farp.crates < n then return false end
   farp.crates = farp.crates - n
+  logistics.refreshMapLabels()
   return true
+end
+
+function logistics.isGeneralSupply(name)
+  return type(name) == "string" and name:sub(1, #"General supply") == "General supply"
+end
+
+-- A normal crate returned at a tent is worth 1. A general-supply crate is worth 5, per the wiki.
+function logistics.crateWorth(name)
+  if logistics.isGeneralSupply(name) then return fcfg().generalSupplyWorth or RH.config.kits.generalSupply.worth or 5 end
+  return 1
+end
+
+function logistics.refreshMapLabels()
+  if not RH.dcs.drawLabel then return end
+  for _, farp in ipairs(logistics.farps()) do
+    if farp.pending then
+      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, farp.name .. "\nbuilds on next restart")
+    else
+      local crates = logistics.hasUnlimitedCrates(farp) and "unlimited" or tostring(farp.crates or 0)
+      RH.dcs.drawLabel("farp-stock-" .. farp.name, "blue", farp, string.format("%s\nCrates: %s", farp.name, crates))
+    end
+  end
 end
 
 function logistics.returnCrates(farp, n)
@@ -121,6 +144,7 @@ function logistics.returnCrates(farp, n)
   local space = fcfg().maxCrates - farp.crates
   local added = math.max(0, math.min(space, n))
   farp.crates = farp.crates + added
+  logistics.refreshMapLabels()
   return added
 end
 
@@ -524,6 +548,8 @@ function logistics.start()
     RH.dcs.spawnMash(name, m)
   end
   logistics.spawnBuilt()
+  logistics.refreshMapLabels()
+  RH.every(30, logistics.refreshMapLabels)
   -- Fuel and ammo change while people are flying. Write them down often, not only every five minutes.
   RH.every(30, function()
     if RH.persistence and RH.persistence.save then RH.persistence.save() end

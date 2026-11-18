@@ -104,7 +104,7 @@ RH.config = {
     lcAirfieldRadius = 1 * 1852,
     -- A tent already placed on the airfield is the Logistics Center even if the zone sits off the beacon.
     placedLcRadius = 5 * 1852,
-    startingCrates = 40,
+    startingCrates = 0,
     maxCrates = 80,
     zoneRadius = 250,
     -- Crates and troops load within this distance of the logistics tent.
@@ -227,6 +227,9 @@ RH.config = {
     mash = { name = "MASH crate", template = "RH_TPL_BLUE_MASH_KIT" },
     outpost = { name = "Outpost crate", template = "RH_TPL_BLUE_OUTPOST_KIT", crates = 2, mass = 800 },
     uhRepair = { name = "UH Repair kit", template = "RH_TPL_BLUE_UHREPAIR_KIT", crates = 1, mass = 300, lifetime = 1800 },
+    -- One physical general-supply crate. Returned at a FARP tent it adds `worth` to that FARP's count.
+    -- The logistics menu offers batches of 1, 5, and 10 of these crates. Logistics Centers only.
+    generalSupply = { name = "General supply", template = "RH_TPL_BLUE_FARP_KIT", worth = 5, batches = { 1, 5, 10 }, mass = 400 },
   },
 
   -- Troops weigh 100 kg each (wiki). Internal crate counts are the wiki "Carry Capacity" table.
