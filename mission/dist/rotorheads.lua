@@ -392,6 +392,8 @@ RH.config = {
 
   -- Vehicle crates. `crates` is how many small CDS crates must sit within 50 m before Build works.
   -- `mass` is kg per crate. A Humvee is four crates. A Chinook (6 internal) can lift one in a single trip.
+  -- Testing override. Set this to nil to use the real crate counts above.
+  testVehicleCrates = 1,
   vehicles = {
     { name = "M1045 HMMWV TOW", template = "RH_TPL_BLUE_HMMWV_TOW", crates = 4, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
     { name = "M1043 HMMWV MG", template = "RH_TPL_BLUE_HMMWV_MG", crates = 2, mass = 300, subcat = "ATV - HMMV - MRAP VEHICLES" },
@@ -3719,7 +3721,8 @@ function ctld.create()
     inst:AddCratesCargo(name, { template }, kind, crates, mass, nil, subcat, nil, nil, nil, "Cargos", inst.basetype, nil, inst.basetype)
   end
   for _, v in ipairs(c.vehicles) do
-    addCrates(v.name, v.template, CTLD_CARGO.Enum.VEHICLE, v.crates, v.mass, v.subcat)
+    local crates = c.testVehicleCrates or v.crates
+    addCrates(v.name, v.template, CTLD_CARGO.Enum.VEHICLE, crates, v.mass, v.subcat)
   end
   ctld.ensureKitTemplate(c.kits.farp.template)
   addCrates(c.kits.farp.name, c.kits.farp.template, CTLD_CARGO.Enum.FOB, c.farp.cratesForFarp, c.farp.farpCrateMass, "FARP AND MASH")
