@@ -147,8 +147,8 @@ RH.config = {
   mash = {
     crates = 6,
     crateMass = 400,
-    -- Testing gap. A player MASH has to sit this far from other MASHes, FARPs, statics, and units.
-    minSeparation = 500,
+    -- A MASH builds only inside this distance of a FARP or Logistics Center.
+    nearSite = 500,
     -- Unlimited for now. A normal MASH holds 30; raise this back to 30 when transport tasks matter.
     capacity = 9999,
     -- Drop off rescued pilots within this distance of the hospital tent.

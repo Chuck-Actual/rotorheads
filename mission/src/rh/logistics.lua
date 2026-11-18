@@ -767,48 +767,23 @@ function logistics.isMashTent(static)
   return hospital and string.sub(name, -5) == " tent"
 end
 
-function logistics.mashBlocker(point)
-  local gap = mcfg().minSeparation or 500
-  -- Crates and the helicopter sit on the build point. They are not another object.
-  local ownSite = 80
-  local function consider(name, pos)
-    if not pos or pos.x == nil then return nil end
-    local d = util.distance(pos, point)
-    if d < ownSite or d >= gap then return nil end
-    return name or "an object", d
+function logistics.mashSiteNear(point)
+  local reach = mcfg().nearSite or 500
+  local function close(pos)
+    return pos and pos.x ~= nil and util.distance(pos, point) <= reach
   end
-  for name, m in pairs(RH.state.mashes) do
-    local hit, d = consider(name, m)
-    if hit then return hit, d end
-  end
-  for name, farp in pairs(RH.state.farps or {}) do
-    local hit, d = consider(farp.name or name, farp)
-    if hit then return hit, d end
-  end
-  if RH.dcs.staticObjects then
-    for _, static in ipairs(RH.dcs.staticObjects()) do
-      local hit, d = consider(static.name or static.typeName, static)
-      if hit then return hit, d end
-    end
-  end
-  if RH.dcs.unitsInRadius then
-    for _, side in ipairs({ "blue", "red", "neutral" }) do
-      for _, unit in ipairs(RH.dcs.unitsInRadius(side, point, gap) or {}) do
-        local hit, d = consider(unit.name or unit.typeName, unit.pos)
-        if hit then return hit, d end
-      end
+  for _, farp in pairs(RH.state.farps or {}) do
+    if close(farp) then return farp end
+    for _, spot in ipairs(farp.loadPoints or {}) do
+      if close(spot) then return farp end
     end
   end
 end
 
 function logistics.validateMashSite(point)
-  if not logistics.inBlueZone(point) then return false, "a MASH must be inside a blue zone" end
-  local name, distance = logistics.mashBlocker(point)
-  if name then
-    local gap = mcfg().minSeparation or 500
-    return false, string.format("%.0f m from %s (needs %d m)", distance, name, gap)
-  end
-  return true
+  if logistics.mashSiteNear(point) then return true end
+  local reach = mcfg().nearSite or 500
+  return false, string.format("You are not within %d m of a FARP or Logistics Center.", reach)
 end
 
 function logistics.registerMash(name, point, playerBuilt)

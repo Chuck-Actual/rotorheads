@@ -484,30 +484,26 @@ T.test("cannot build an LC at a red airfield", function()
   T.ok(reason:find("REDFOR"), reason)
 end)
 
-T.test("MASH needs a blue zone and 500 m from other objects", function()
+T.test("a MASH builds only within 500 m of a FARP or Logistics Center", function()
   local w = setup()
-  w.zones = { { name = "RH_BLUEZONE_WEST", point = { x = 0, y = 0 }, radius = 60000 } }
-  local ok, reason = RH.logistics.validateMashSite({ x = 100000, y = 100000 })
+  w.statics["static1-7"] = { alive = true, typeName = "FARP", point = { x = 39745, y = 0 }, side = "blue" }
+  w.statics["static1-3"] = { alive = true, typeName = "FARP", point = { x = 39503, y = 0 }, side = "blue" }
+  table.insert(w.units, {
+    name = "RH_TPL_BLUE_LINEBACKER-23286#001-01", side = "blue", alive = true, ground = true, pos = { x = 39584, y = 0 },
+  })
+  local ok, reason = RH.logistics.validateMashSite({ x = 100000, y = 0 })
   T.eq(ok, false)
-  T.ok(reason:find("blue zone"), reason)
-  T.ok(RH.logistics.buildMash({ x = 10000, y = 0 }, "Medic"))
+  T.ok(reason:find("not within 500 m"), reason)
+  -- 255 m from the FARP, and closer to a pad static. The static does not block the build.
+  T.ok(RH.logistics.buildMash({ x = 39745, y = 0 }, "Medic"))
   T.eq(RH.state.mashes["MASH 01"].player, true)
-  ok, reason = RH.logistics.validateMashSite({ x = 10400, y = 0 })
+  -- 490 m from the FARP, 7 m from a pad, and 74 m from a blue vehicle.
+  T.ok(RH.logistics.buildMash({ x = 39510, y = 0 }, "Medic"))
+  ok, reason = RH.logistics.validateMashSite({ x = 40600, y = 0 })
   T.eq(ok, false)
-  T.ok(reason:find("500"), reason)
-  w.statics.tower = { alive = true, typeName = "house", point = { x = 12000, y = 0 }, side = "blue" }
-  ok, reason = RH.logistics.validateMashSite({ x = 12300, y = 0 })
-  T.eq(ok, false)
-  T.ok(reason:find("tower"), reason)
-  table.insert(w.units, { name = "truck", side = "blue", alive = true, pos = { x = 14000, y = 0 } })
-  ok, reason = RH.logistics.validateMashSite({ x = 14200, y = 0 })
-  T.eq(ok, false)
-  T.ok(reason:find("truck"), reason)
-  -- The kit and the helicopter sit on the build point, so an object inside 80 m does not block it.
-  ok, reason = RH.logistics.validateMashSite({ x = 14050, y = 0 })
-  T.eq(ok, true)
-  T.ok(RH.logistics.buildMash({ x = 10600, y = 0 }, "Medic"))
-  T.eq(#w.mashesSpawned, 2)
+  T.ok(reason:find("not within 500 m"), reason)
+  T.ok(RH.logistics.buildMash({ x = 900, y = 0 }, "Medic"))
+  T.eq(#w.mashesSpawned, 3)
 end)
 
 T.test("an editor MASH zone is not spawned and its tent is removed", function()
