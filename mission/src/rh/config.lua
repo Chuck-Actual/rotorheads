@@ -107,8 +107,10 @@ RH.config = {
     startingCrates = 0,
     maxCrates = 80,
     zoneRadius = 250,
-    -- Crates and troops load within this distance of the logistics tent.
+    -- Crates and troops load within this distance of a FARP tent.
     loadRadius = 150,
+    -- A logistics center covers the apron, not only the tent. The blue circle uses this same radius.
+    lcLoadRadius = 500,
     displayCirclesFor = 60,
     -- New FARPs take one of these. A name stays taken until that FARP is decommissioned.
     names = {

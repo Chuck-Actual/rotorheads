@@ -99,41 +99,78 @@ function ctld.tentPoints(farp)
   return { { x = farp.x, y = farp.y } }, false
 end
 
+function ctld.zoneRadius(farp)
+  if farp and (farp.lc or (RH.logistics and RH.logistics.hasUnlimitedCrates(farp))) then
+    return RH.config.farp.lcLoadRadius or 500
+  end
+  return RH.config.farp.loadRadius or 150
+end
+
 function ctld.refreshZones()
   if not ctld.instance or not RH.logistics then return end
   for _, farp in ipairs(RH.logistics.farps()) do
-    ctld.addFarpZone(farp)
+    ctld.ensureFarpZone(farp)
   end
+  if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
 end
 
-function ctld.addFarpZone(farp)
-  if not ctld.instance or farp.loadZoneReady then return end
+-- The saved flag loadZoneReady is ignored. Every FARP already in the campaign gets a zone
+-- again on this mission, and a logistics center uses the apron radius.
+ctld.zoneReady = {}
+
+function ctld.ensureFarpZone(farp)
+  if not ctld.instance or not farp or not farp.name then return end
+  farp.loadZoneReady = nil
   local points, atTent = ctld.tentPoints(farp)
   farp.loadPoints = points
-  local radius = RH.config.farp.loadRadius
+  local radius = ctld.zoneRadius(farp)
   for i, point in ipairs(points) do
     local zoneName = "RH_LOAD_" .. farp.name .. "_" .. i
-    local zone = ZONE:FindByName(zoneName)
-    if zone and zone.UpdateFromVec2 then
-      zone:UpdateFromVec2({ x = point.x, y = point.y }, radius)
-    else
-      ZONE_RADIUS:New(zoneName, { x = point.x, y = point.y }, radius)
+    if ZONE and ZONE_RADIUS then
+      local zone = ZONE.FindByName and ZONE:FindByName(zoneName)
+      if zone and zone.UpdateFromVec2 then
+        zone:UpdateFromVec2({ x = point.x, y = point.y }, radius)
+      elseif not zone then
+        ZONE_RADIUS:New(zoneName, { x = point.x, y = point.y }, radius)
+      end
+      local key = farp.name .. ":" .. i
+      if not ctld.zoneReady[key] then
+        ctld.instance:AddCTLDZone(zoneName, CTLD.CargoZoneType.LOAD, SMOKECOLOR.Blue, true, false)
+        ctld.zoneReady[key] = true
+      end
     end
-    -- LOAD covers troops and crates. Troops are not taken from the crate stock.
-    ctld.instance:AddCTLDZone(zoneName, CTLD.CargoZoneType.LOAD, SMOKECOLOR.Blue, true, false)
+  end
+  return atTent, radius
+end
+
+function ctld.drawLoadZones(farp)
+  if not farp or not farp.name then return 0 end
+  local points = (farp.loadPoints and #farp.loadPoints > 0) and farp.loadPoints or { { x = farp.x, y = farp.y } }
+  local radius = ctld.zoneRadius(farp)
+  local seconds = RH.config.farp.displayCirclesFor or 60
+  local drawn = 0
+  for i, point in ipairs(points) do
     local id = "rh-load-" .. farp.name .. "-" .. i
     RH.dcs.drawCircle(id, "blue", point, radius, { 0, 0.55, 1, 1 }, { 0, 0.55, 1, 0.18 }, "Load")
-    RH.after(RH.config.farp.displayCirclesFor or 60, function()
+    drawn = drawn + 1
+    RH.after(seconds, function()
       RH.dcs.removeDrawing(id)
       if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
     end)
   end
-  farp.loadZoneReady = true
+  return drawn
+end
+
+function ctld.addFarpZone(farp)
+  local atTent = ctld.ensureFarpZone(farp)
+  ctld.drawLoadZones(farp)
   return atTent
 end
 
 function ctld.reply(Group, text)
-  if ctld.instance then ctld.instance:_SendMessage(text, 10, false, Group) end
+  if ctld.instance and ctld.instance._SendMessage then
+    ctld.instance:_SendMessage(text, 10, false, Group)
+  end
 end
 
 function ctld.create()
@@ -205,16 +242,17 @@ function ctld.create()
 
   ctld.instance = inst
   if RH.logistics.discoverEditorPads then RH.logistics.discoverEditorPads() end
+  if RH.logistics.assignFarpNames then RH.logistics.assignFarpNames() end
   if RH.logistics.equipEditorFarps then RH.logistics.equipEditorFarps() end
   if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
   local notes = {}
   for _, farp in ipairs(RH.logistics.farps()) do
     local atTent = ctld.addFarpZone(farp)
-    table.insert(notes, farp.name .. (atTent and " (tent)" or " (zone center, no tent found)"))
+    table.insert(notes, (farp.label or farp.name) .. (atTent and " (tent)" or " (zone center, no tent found)"))
   end
   if #notes > 0 then
-    RH.dcs.message("blue", "Logistics load zones, 150 m, shown in blue for 60 seconds: " .. table.concat(notes, ", ")
-      .. ". Vehicle crates are under CTLD > Cargos. FARP crates and general supply come from a logistics center.", 25)
+    RH.dcs.message("blue", "Logistics load zones shown in blue for 60 seconds: " .. table.concat(notes, ", ")
+      .. ". A logistics center covers 500 m. A FARP tent covers 150 m. Crate counts stay on the map.", 25)
   end
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
@@ -335,16 +373,8 @@ function ctld.showLoadZones(group)
   local seconds = RH.config.farp.displayCirclesFor or 60
   local drawn = 0
   for _, farp in ipairs(RH.logistics.farps()) do
-    local points = (farp.loadPoints and #farp.loadPoints > 0) and farp.loadPoints or { { x = farp.x, y = farp.y } }
-    for i, point in ipairs(points) do
-      local id = "rh-load-" .. farp.name .. "-" .. i
-      RH.dcs.drawCircle(id, "blue", point, RH.config.farp.loadRadius or 150, { 0, 0.55, 1, 1 }, { 0, 0.55, 1, 0.18 }, "Load")
-      drawn = drawn + 1
-      RH.after(seconds, function()
-        RH.dcs.removeDrawing(id)
-        if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
-      end)
-    end
+    ctld.ensureFarpZone(farp)
+    drawn = drawn + ctld.drawLoadZones(farp)
   end
   if RH.logistics.refreshMapLabels then RH.logistics.refreshMapLabels() end
   ctld.reply(group, string.format("Logistics zones shown for %d seconds. Crate counts stay on the map.", seconds))

@@ -92,9 +92,19 @@ function logistics.pickFarpName(except)
   return free[math.random(#free)]
 end
 
+function logistics.isBankName(label)
+  if type(label) ~= "string" then return false end
+  for _, name in ipairs(fcfg().names or {}) do
+    if label == "FARP " .. name then return true end
+  end
+  return false
+end
+
+-- Existing FARPs in the save get a bank name too. A logistics center keeps its own name.
 function logistics.assignFarpNames()
   for _, farp in pairs(RH.state.farps) do
-    if not farp.lc and logistics.labelIsPlaceholder(farp.label) then
+    farp.loadZoneReady = nil
+    if not farp.lc and not logistics.isBankName(farp.label) then
       local picked = logistics.pickFarpName(farp)
       if picked then farp.label = picked end
     end

@@ -124,7 +124,8 @@ T.test("an editor tent shows crates at startup, limits pulls, and gets one Humve
   RH.ctld.instance = inst
   T.eq(RH.ctld.addFarpZone(farp), true)
   T.eq(#zones, 1)
-  T.eq(RH.ctld.addFarpZone(farp), nil)
+  T.eq(RH.ctld.addFarpZone(farp), true)
+  T.eq(#zones, 1)
   RH.ctld.installHooks(inst)
   local unit = { GetVec2 = function() return { x = 80005, y = 1005 } end }
   local cargo = { GetName = function() return "Avenger" end, GetCratesNeeded = function() return 1 end }
@@ -205,6 +206,44 @@ T.test("show logistics zones draws a circle and leaves the crate count", functio
   w.advance(60)
   T.eq(w.drawings["rh-load-FARP MUSTANG-1"], nil)
   T.eq(w.drawings["farp-stock-FARP MUSTANG"].text, "FARP MUSTANG\nCrates: 4")
+end)
+
+T.test("a saved FARP and the Bassel logistics center get a zone and a crate label", function()
+  local w = setup()
+  dofile("src/rh/ctld.lua")
+  local old = RH.logistics.register("static1-4", { x = 90000, y = 0 }, { editor = true, label = "FARP Tent", crates = 12 })
+  old.loadZoneReady = true
+  local lc = RH.state.farps["LC Bassel"]
+  lc.loadZoneReady = true
+  RH.logistics.assignFarpNames()
+  T.ok(RH.logistics.isBankName(old.label))
+  T.eq(old.loadZoneReady, nil)
+  T.ok(not RH.logistics.isBankName(lc.label))
+  RH.logistics.refreshMapLabels()
+  T.eq(w.drawings["farp-stock-static1-4"].text, old.label .. "\nCrates: 12")
+  T.eq(w.drawings["farp-stock-LC Bassel"].text, "LC Bassel\nCrates: unlimited")
+  local created = {}
+  local added = {}
+  ZONE = { FindByName = function() return nil end }
+  ZONE_RADIUS = { New = function(_, name, _, radius) created[#created + 1] = { name = name, radius = radius } end }
+  CTLD = { CargoZoneType = { LOAD = "load" } }
+  SMOKECOLOR = { Blue = 1 }
+  RH.ctld.instance = { AddCTLDZone = function(_, name) added[#added + 1] = name end }
+  RH.ctld.zoneReady = {}
+  old.loadZoneReady = true
+  lc.loadZoneReady = true
+  RH.ctld.ensureFarpZone(lc)
+  RH.ctld.ensureFarpZone(old)
+  T.eq(created[1].radius, 500)
+  T.eq(created[2].radius, 150)
+  T.eq(#added, 2)
+  RH.ctld.ensureFarpZone(lc)
+  T.eq(#added, 2)
+  RH.ctld.showLoadZones({})
+  T.eq(w.drawings["rh-load-LC Bassel-1"].radius, 500)
+  T.eq(w.drawings["rh-load-static1-4-1"].radius, 150)
+  ZONE, ZONE_RADIUS, CTLD, SMOKECOLOR = nil, nil, nil, nil
+  RH.ctld.instance = nil
 end)
 
 T.test("the Chinook does not load or drop crates through CTLD", function()
