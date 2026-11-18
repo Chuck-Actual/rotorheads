@@ -66,6 +66,16 @@ function ctld.ensureKitTemplate(name)
   return true
 end
 
+-- NASAMS and Roland only share a radar when every piece is in the same DCS group.
+ctld.samLinkRadius = 2500
+
+function ctld.samFamily(groupName, typeName)
+  local blob = string.upper((groupName or "") .. " " .. (typeName or ""))
+  if string.find(blob, "NASAMS", 1, true) then return "NASAMS" end
+  if string.find(blob, "ROLAND", 1, true) then return "ROLAND" end
+  return nil
+end
+
 -- One click spawns either the whole set or a single crate, so a second trip can finish a vehicle.
 function ctld.crateChoices(needed)
   needed = math.max(1, math.floor(tonumber(needed) or 1))
@@ -210,7 +220,9 @@ function ctld.create()
   if RH.logistics.refreshPlacedCenters then RH.logistics.refreshPlacedCenters() end
   ctld.installHooks(inst)
   ctld.installMenus(inst)
+  if RH.events and RH.events.on then RH.events.on("playerEnter", ctld.onPlayerEnter) end
   inst:__Start(2)
+  if RH.after then RH.after(20, ctld.linkExisting) end
   -- Once the world snapshot exists it restores vehicles and crates itself. Loading CTLD's
   -- csv as well would build a second copy. The first run still reads the csv, so a Humvee
   -- saved only there can come back once and then join the snapshot.
@@ -337,7 +349,10 @@ function ctld.installHooks(inst)
     local kit = templateKit(Vehicle:GetName())
     -- Leave the unit on the crate it was built from. Moving every build behind the helicopter
     -- stacked a radar, a CP, and a launcher on the same spot.
-    if not kit then return end
+    if not kit then
+      ctld.linkSam(Vehicle)
+      return
+    end
     local point = Vehicle:GetVec2()
     local player = Unit and Unit:GetPlayerName() or "A pilot"
     local ok, reason
@@ -361,6 +376,119 @@ function ctld.installHooks(inst)
     else
       ctld.reply(Group, string.format("Cannot build here: %s. Pack the kit (CTLD > Pack) and move it.", tostring(reason)))
     end
+  end
+end
+
+function ctld.unitHeading(unit)
+  local ok, pos = pcall(function() return unit:getPosition() end)
+  if not ok or type(pos) ~= "table" or type(pos.x) ~= "table" then return 0 end
+  local h = math.atan2(pos.x.z or 0, pos.x.x or 1)
+  if h < 0 then h = h + math.pi * 2 end
+  return h
+end
+
+function ctld.collectSam(group, family, anchor, into, seen)
+  if not group or not group.isExist or not group:isExist() then return end
+  local name = group.getName and group:getName() or ""
+  if seen[name] then return end
+  local units = group.getUnits and group:getUnits() or {}
+  local taken = false
+  for _, unit in ipairs(units) do
+    if unit:isExist() and unit:getLife() > 1 then
+      local point = unit:getPoint()
+      local pos = { x = point.x, y = point.z }
+      local fam = ctld.samFamily(name, unit:getTypeName())
+      if fam == family and RH.util.distance(anchor, pos) <= ctld.samLinkRadius then
+        into[#into + 1] = { type = unit:getTypeName(), x = pos.x, y = pos.y, heading = ctld.unitHeading(unit) }
+        taken = true
+      end
+    end
+  end
+  if taken then seen[name] = group end
+end
+
+-- Rebuild every NASAMS or Roland piece within 2.5 km as one group so the radar can cue the launchers.
+function ctld.linkSam(spawned)
+  if not spawned or not spawned.GetName or not coalition or not coalition.getGroups then return end
+  local dcsGroup = Group.getByName(spawned:GetName())
+  if not dcsGroup then return end
+  local family
+  for _, unit in ipairs(dcsGroup:getUnits() or {}) do
+    if unit:isExist() then
+      family = ctld.samFamily(dcsGroup:getName(), unit:getTypeName())
+      if family then break end
+    end
+  end
+  if not family then return end
+  local anchor = spawned.GetVec2 and spawned:GetVec2() or { x = 0, y = 0 }
+  local pieces, seen = {}, {}
+  ctld.collectSam(dcsGroup, family, anchor, pieces, seen)
+  for _, group in ipairs(coalition.getGroups(coalition.side.BLUE, Group.Category.GROUND) or {}) do
+    ctld.collectSam(group, family, anchor, pieces, seen)
+  end
+  if #pieces < 2 then
+    ctld.reply(spawned, family .. " is in place. Add the rest of the battery within 2.5 km and they will link.")
+    return
+  end
+  for _, group in pairs(seen) do
+    if group.destroy then group:destroy() end
+  end
+  ctld.batterySerial = (ctld.batterySerial or 0) + 1
+  local name = string.format("RH %s %d", family, ctld.batterySerial)
+  local ok = RH.dcs.spawnSamBattery and RH.dcs.spawnSamBattery(name, pieces)
+  if not ok then return end
+  if RH.after and GROUP then
+    RH.after(1, function()
+      local linked = GROUP:FindByName(name)
+      if not linked then return end
+      linked:OptionROEOpenFire()
+      linked:OptionAlarmStateRed()
+    end)
+  end
+  ctld.reply(spawned, string.format("%s battery linked, %d units. The radar, command post, and launchers are one group.", family, #pieces))
+end
+
+function ctld.linkExisting()
+  if not coalition or not coalition.getGroups or not GROUP then return end
+  local names = {}
+  for _, group in ipairs(coalition.getGroups(coalition.side.BLUE, Group.Category.GROUND) or {}) do
+    local name = group:getName()
+    for _, unit in ipairs(group:getUnits() or {}) do
+      if unit:isExist() and ctld.samFamily(name, unit:getTypeName()) then
+        names[#names + 1] = name
+        break
+      end
+    end
+  end
+  for _, name in ipairs(names) do
+    local wrapper = GROUP:FindByName(name)
+    if wrapper and wrapper:IsAlive() then ctld.linkSam(wrapper) end
+  end
+end
+
+function ctld.onPlayerEnter(e)
+  if not e or e.initiatorCoalition ~= "blue" then return end
+  if e.initiatorCategory ~= "helicopter" and e.initiatorCategory ~= "plane" then return end
+  local function rebuild()
+    local inst = ctld.instance
+    if not inst or not e.initiatorName then return end
+    inst.MenusDone[e.initiatorName] = nil
+    if UNIT and UNIT.FindByName then
+      local unit = UNIT:FindByName(e.initiatorName)
+      local group = unit and unit.GetGroup and unit:GetGroup()
+      if group and group.CTLDTopmenu and group.CTLDTopmenu.Remove then
+        group.CTLDTopmenu:Remove()
+        group.CTLDTopmenu = nil
+      end
+      if group then group.RHReturnCrates = nil end
+    end
+    if inst._RefreshF10Menus then inst:_RefreshF10Menus() end
+  end
+  if RH.after then
+    RH.after(1, rebuild)
+    RH.after(5, rebuild)
+  else
+    rebuild()
   end
 end
 

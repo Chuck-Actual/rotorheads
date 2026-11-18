@@ -554,8 +554,44 @@ function logistics.completeTransport(unitName)
   return n
 end
 
+function logistics.isMashTent(static)
+  local name = static.name or ""
+  local blob = string.upper(name .. " " .. (static.typeName or "") .. " " .. (static.display or ""))
+  if name:sub(1, 5) == "MASH " and name:sub(-5) == " tent" then return true end
+  if blob:find("M92", 1, true) or blob:find("TENT04", 1, true) then return true end
+  return false
+end
+
+-- The old editor MASH left two M92 tents on the same spot, and the save put them back.
+function logistics.clearStaleMashTents()
+  if not RH.dcs.staticObjects then return end
+  local anchors = {}
+  for _, m in pairs(RH.state.mashes) do
+    if m.player then anchors[#anchors + 1] = m end
+  end
+  local kept = {}
+  for _, static in ipairs(RH.dcs.staticObjects()) do
+    if logistics.isMashTent(static) then
+      local nearPlayer = false
+      for _, m in ipairs(anchors) do
+        if util.distance(static, m) < 30 then nearPlayer = true break end
+      end
+      local stacked = false
+      for _, other in ipairs(kept) do
+        if util.distance(static, other) < 20 then stacked = true break end
+      end
+      if not nearPlayer or stacked then
+        RH.dcs.destroyStatic(static.name)
+      else
+        kept[#kept + 1] = static
+      end
+    end
+  end
+end
+
 function logistics.start()
   logistics.discoverPlaced()
+  logistics.clearStaleMashTents()
   -- MASHes are player-built. A zone or tent left in the mission editor is not spawned.
   for name, m in pairs(RH.state.mashes) do
     if m.player then RH.dcs.spawnMash(name, m) end

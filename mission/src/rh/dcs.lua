@@ -85,6 +85,7 @@ local EVENT_NAMES = {
   [world.event.S_EVENT_EJECTION] = "ejection",
   [world.event.S_EVENT_CRASH] = "crash",
   [world.event.S_EVENT_PLAYER_LEAVE_UNIT] = "playerLeave",
+  [world.event.S_EVENT_PLAYER_ENTER_UNIT] = "playerEnter",
   [world.event.S_EVENT_KILL] = "kill",
   [world.event.S_EVENT_SHOT] = "shot",
   [world.event.S_EVENT_LAND] = "land",
@@ -123,6 +124,7 @@ function dcs.normalize(event)
   if init then
     e.initiatorName, e.initiatorType, e.initiatorCoalition = init.name, init.typeName, init.coalition
     e.initiatorCategory, e.playerName, e.groupId = init.category, init.playerName, init.groupId
+    e.groupName = init.groupName
     e.pos, e.initiatorPos, e.onGround = init.pos, init.pos, init.inAir == false
   elseif event.initiator and event.initiator.getName then
     local okName, name = pcall(event.initiator.getName, event.initiator)
@@ -776,16 +778,49 @@ function dcs.spawnVehicle(name, typeName, point, headingDeg)
   return coalition.addGroup(country.id.USA, Group.Category.GROUND, groupData)
 end
 
+function dcs.spawnFarpPad(name, point, freq)
+  local vec = util.toVec2(point)
+  for _, static in ipairs(dcs.staticObjects()) do
+    local kind = static.typeName or ""
+    local isPad = kind == "FARP" or kind == "Invisible FARP" or kind == "SINGLE_HELIPAD"
+    if isPad and static.name ~= name and util.distance(static, vec) < 120 then
+      dcs.destroyNamed(static.name)
+    end
+  end
+  dcs.destroyNamed(name)
+  local unit = {
+    category = "Heliports",
+    type = "FARP",
+    shape_name = "FARPS",
+    x = vec.x,
+    y = vec.y,
+    name = name,
+    heading = 0,
+    heliport_callsign_id = (CALLSIGN and CALLSIGN.FARP and CALLSIGN.FARP.Berlin) or 1,
+    heliport_frequency = tostring(freq or 127.5),
+    heliport_modulation = 0,
+    dynamicSpawn = true,
+    allowHotStart = false,
+    dead = false,
+  }
+  local groupData = {
+    visible = true,
+    hidden = false,
+    name = name,
+    x = vec.x,
+    y = vec.y,
+    units = { unit },
+  }
+  local ok, err = pcall(coalition.addGroup, country.id.USA, -1, groupData)
+  if not ok then util.log("FARP pad %s failed: %s", name, tostring(err)) end
+  return ok
+end
+
 function dcs.spawnFarp(farp)
   local pad = COORDINATE:NewFromVec2(util.toVec2(farp))
-  -- A pad restored from the editor copy is already there. Fill its warehouse instead of building a second one.
-  if not dcs.objectExists(farp.name) then
-    local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
-    helipad:InitShape("FARPS")
-    -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
-    helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
-    helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
-  end
+  -- Replace any pad already sitting here. An editor pad, or one restored as a plain static,
+  -- keeps DCS's unlimited warehouse and has dynamic spawn switched off.
+  dcs.spawnFarpPad(farp.name, farp, farp.freq)
   for _, piece in ipairs(RH.config.farp.services or {}) do
     local spot = pad:Translate(piece.dist or 40, piece.bearing or 0)
     local objectName = farp.name .. " " .. piece.label
@@ -803,12 +838,14 @@ function dcs.spawnFarp(farp)
     end
   end
   local function fill()
-    local warehouse = dcs.farpWarehouse(farp.name)
-    if warehouse then dcs.applyWarehouse(farp, warehouse) end
+    dcs.armFarp(farp.name, farp.ammoItems)
   end
   fill()
-  -- The airbase sometimes appears a moment after the pad is created.
-  if RH.after then RH.after(2, fill) end
+  if RH.after then
+    RH.after(2, fill)
+    RH.after(10, fill)
+    RH.after(30, fill)
+  end
 end
 
 function dcs.farpWarehouse(name)
@@ -822,23 +859,28 @@ end
 
 -- A scripted FARP warehouse starts unlimited. Zero fuel and every weapon, then put back
 -- only the helicopter shelf (guns, rockets, air-to-air) plus missiles the players hauled in.
+function dcs.eachStorageItem(fn)
+  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
+  if type(weapons) ~= "table" then return end
+  for category, group in pairs(weapons) do
+    if type(group) == "table" then
+      for _, item in pairs(group) do
+        if type(item) == "string" then fn(category, item) end
+      end
+    end
+  end
+end
+
 function dcs.limitFarpWarehouse(wh, hauled)
   if not wh or not wh.setLiquidAmount then return end
   for liquid = 0, 3 do
     pcall(function() wh:setLiquidAmount(liquid, 0) end)
   end
-  local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
-  if weapons and RH.logistics and RH.logistics.farpSupplyCount then
-    for category, group in pairs(weapons) do
-      if type(group) == "table" then
-        for _, item in pairs(group) do
-          if type(item) == "string" then
-            local count = RH.logistics.farpSupplyCount(category, item) or 0
-            pcall(function() wh:setItem(item, count) end)
-          end
-        end
-      end
-    end
+  if RH.logistics and RH.logistics.farpSupplyCount then
+    dcs.eachStorageItem(function(category, item)
+      local count = RH.logistics.farpSupplyCount(category, item) or 0
+      pcall(function() wh:setItem(item, count) end)
+    end)
   end
   for item, amount in pairs(hauled or {}) do
     if RH.logistics and RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
@@ -846,6 +888,20 @@ function dcs.limitFarpWarehouse(wh, hauled)
     end
   end
   dcs.topUpAirframes(wh)
+end
+
+function dcs.armFarp(name, hauled)
+  local wh = dcs.farpWarehouse(name)
+  dcs.limitFarpWarehouse(wh, hauled)
+  if not STORAGE or not STORAGE.New then return end
+  pcall(function()
+    local st = STORAGE:New(name)
+    if not st or not st.SetLiquid or not STORAGE.Liquid then return end
+    st:SetLiquid(STORAGE.Liquid.JETFUEL, 0)
+    st:SetLiquid(STORAGE.Liquid.GASOLINE, 0)
+    st:SetLiquid(STORAGE.Liquid.DIESEL, 0)
+    if STORAGE.Liquid.MW50 then st:SetLiquid(STORAGE.Liquid.MW50, 0) end
+  end)
 end
 
 function dcs.applyWarehouse(farp, wh)
@@ -857,11 +913,18 @@ function dcs.seedFarpSupplies(wh)
 end
 
 function dcs.limitPlayerFarpWarehouses()
-  if not dcs.airbases then return end
+  if not dcs.airbases or not RH.state or not RH.state.farps then return end
   for _, ab in ipairs(dcs.airbases()) do
-    if ab.kind == "helipad" and ab.coalition ~= "red" then
-      local farp = RH.state and RH.state.farps and RH.state.farps[ab.name]
-      dcs.limitFarpWarehouse(dcs.farpWarehouse(ab.name), farp and farp.ammoItems)
+    if ab.kind ~= "ship" and ab.coalition ~= "red" then
+      local farp = RH.state.farps[ab.name]
+      if not farp then
+        for _, candidate in pairs(RH.state.farps) do
+          if util.distance(candidate, ab.point) < 400 then farp = candidate break end
+        end
+      end
+      if farp or ab.kind == "helipad" then
+        dcs.armFarp(ab.name, farp and farp.ammoItems)
+      end
     end
   end
 end
@@ -889,6 +952,36 @@ function dcs.captureFarpStock(farp)
   farp.ammoItems = kept
   dcs.topUpAirframes(wh)
   return true
+end
+
+function dcs.spawnSamBattery(name, pieces)
+  if type(pieces) ~= "table" or #pieces == 0 or not coalition or not coalition.addGroup then return false end
+  dcs.destroyNamed(name)
+  local units = {}
+  for i, piece in ipairs(pieces) do
+    units[i] = {
+      type = piece.type,
+      name = string.format("%s %d", name, i),
+      skill = "Excellent",
+      x = piece.x,
+      y = piece.y,
+      heading = piece.heading or 0,
+      playerCanDrive = false,
+    }
+  end
+  local groupData = {
+    visible = true,
+    hidden = false,
+    task = "Ground Nothing",
+    name = name,
+    x = units[1].x,
+    y = units[1].y,
+    route = { points = { { x = units[1].x, y = units[1].y, type = "Off Road", action = "Off Road", speed = 0 } } },
+    units = units,
+  }
+  local ok, err = pcall(coalition.addGroup, country.id.USA, Group.Category.GROUND, groupData)
+  if not ok then util.log("SAM battery %s failed: %s", name, tostring(err)) end
+  return ok
 end
 
 function dcs.spawnMash(name, point)

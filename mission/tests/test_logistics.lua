@@ -163,6 +163,26 @@ T.test("MASH needs a blue zone and 1 mile separation", function()
   T.eq(#w.mashesSpawned, 2)
 end)
 
+T.test("a stale MASH tent is removed and a live one is kept", function()
+  local w = setup()
+  w.statics["Old tent"] = { side = "blue", point = { x = 5000, y = 0 }, alive = true, typeName = "Tent04", display = "M92" }
+  w.statics["MASH 01 tent"] = { side = "blue", point = { x = 10, y = 0 }, alive = true, typeName = "Tent04", display = "M92" }
+  w.statics["Extra tent"] = { side = "blue", point = { x = 12, y = 0 }, alive = true, typeName = "Tent04", display = "M92" }
+  RH.state.mashes["MASH 01"] = { x = 10, y = 0, player = true }
+  RH.logistics.clearStaleMashTents()
+  T.eq(w.statics["Old tent"].alive, false)
+  local live = (w.statics["MASH 01 tent"].alive and 1 or 0) + (w.statics["Extra tent"].alive and 1 or 0)
+  T.eq(live, 1)
+end)
+
+T.test("NASAMS pieces are recognized as one battery family", function()
+  T.fresh()
+  dofile("src/rh/ctld.lua")
+  T.eq(RH.ctld.samFamily("RH_TPL_BLUE_NASAMS_C2-4", "NASAMS_Command_Post"), "NASAMS")
+  T.eq(RH.ctld.samFamily("RH_TPL_BLUE_ROLAND-2", "Roland Radar"), "ROLAND")
+  T.eq(RH.ctld.samFamily("RH_TPL_BLUE_HMMWV_TOW-1", "Hummer"), nil)
+end)
+
 T.test("a crate menu offers the full set or a single crate", function()
   T.fresh()
   dofile("src/rh/ctld.lua")

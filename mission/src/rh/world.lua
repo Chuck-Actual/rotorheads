@@ -31,6 +31,8 @@ function world.excluded(name)
   if name:sub(1, 7) == "RH_TPL_" and not string.find(name, "#", 1, true) and not string.find(name, "%-%d+$") then
     return true
   end
+  -- Player MASH tents are spawned from the save. Keeping a copy here stacked a second tent on the old site.
+  if name:sub(1, 5) == "MASH " and name:sub(-5) == " tent" then return true end
   return false
 end
 

@@ -48,6 +48,10 @@ function csar.create()
 
   csar.instance = inst
   csar.installHooks(inst)
+  if RH.events and RH.events.on then
+    RH.events.on("playerEnter", csar.onPlayerEnter)
+    RH.events.on("playerLeave", csar.onPlayerLeave)
+  end
   inst:__Start(2)
   if inst.enableLoadSave then inst:__Load(10) end
   return inst
@@ -649,6 +653,37 @@ function csar.onLand(e)
   if e.placeKind == "airdrome" or e.placeKind == "ship" then
     local n = RH.logistics.completeTransport(e.initiatorName)
     RH.dcs.messageToUnit(e.initiatorName, string.format("%d patients delivered to %s. MASH capacity freed.", n, e.place or "the airfield"), 15)
+  end
+end
+
+function csar.forgetMenu(groupName)
+  local inst = csar.instance
+  if inst and inst.addedTo and groupName then inst.addedTo[groupName] = nil end
+end
+
+function csar.onPlayerLeave(e)
+  csar.forgetMenu(e and e.groupName)
+end
+
+-- Slotting red destroys the F10 menu. MOOSE remembers the group and will not build it again.
+function csar.onPlayerEnter(e)
+  if not e or e.initiatorCoalition ~= "blue" or e.initiatorCategory ~= "helicopter" then return end
+  local function rebuild()
+    local inst = csar.instance
+    if not inst or not inst._AddMedevacMenuItem then return end
+    csar.forgetMenu(e.groupName)
+    if e.initiatorName and UNIT and UNIT.FindByName then
+      local unit = UNIT:FindByName(e.initiatorName)
+      local group = unit and unit.GetGroup and unit:GetGroup()
+      if group and group.GetName then csar.forgetMenu(group:GetName()) end
+    end
+    inst:_AddMedevacMenuItem()
+  end
+  if RH.after then
+    RH.after(1, rebuild)
+    RH.after(5, rebuild)
+  else
+    rebuild()
   end
 end
 
