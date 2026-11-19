@@ -599,8 +599,10 @@ local DEFAULT_HELICOPTERS = {
   "AH-64D_BLK_II", "Ka-50", "Ka-50_3",
 }
 
--- The same entry the Mission Editor writes for a pad with Dynamic Spawn on. Fuel and air-to-ground
--- missiles are limited; the running campaign fills guns, rockets, and air-to-air from its own shelf list.
+-- The same entry the Mission Editor writes for a pad with Dynamic Spawn on. Fuel is explicit.
+-- The weapon list stays empty: DCS stores those by wsType, which this export does not have.
+-- An empty list makes a limited warehouse show 100 of every weapon, and the mission script
+-- replaces that with 0 for air-to-ground and the shelf counts for everything else.
 function miz.warehouseEntry(pad, helicopters)
   local limited = not pad.lc
   local heli = {}

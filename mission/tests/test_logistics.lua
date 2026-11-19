@@ -35,7 +35,7 @@ T.test("a new FARP warehouse starts empty and a later launch keeps delivered fue
   T.eq(written["LC Bassel"], nil)
   T.eq(written["FARP COPPERHEAD-shelf"], true)
 
-  RH.logistics.padHold["FARP COPPERHEAD"] = nil
+  RH.logistics.padHold["FARP COPPERHEAD"] = -1
   RH.dcs.readPadStock = function()
     return {
       fuelKg = 1800,
@@ -91,6 +91,62 @@ T.test("saved FARP fuel and missiles are zeroed once, then a delivery stays", fu
   T.eq(written["FARP MUSTANG"].fuelKg, 800)
   T.eq(written["FARP MUSTANG"].missiles["weapons.missiles.AGM_114K"], 4)
   T.eq(written["FARP MUSTANG"].missiles["weapons.missiles.Vikhr_M"], nil)
+end)
+
+T.test("a save that already kept the default 100s loses those counts once and keeps its fuel", function()
+  T.fresh()
+  RH.state.warehouseReset = 1
+  RH.state.padStock["FARP OUTLAW"] = {
+    fuelKg = 2500, granted = true,
+    missiles = { ["weapons.missiles.AGM_114K"] = 100, ["weapons.missiles.9M120"] = 100 },
+  }
+  RH.state.farps["FARP OUTLAW"] = {
+    name = "FARP OUTLAW", ammoItems = { ["weapons.missiles.AGM_114K"] = 100 },
+  }
+  RH.logistics.clearCarriedStock()
+  T.eq(RH.state.padStock["FARP OUTLAW"].fuelKg, 2500)
+  T.eq(next(RH.state.padStock["FARP OUTLAW"].missiles), nil)
+  T.eq(RH.state.farps["FARP OUTLAW"].ammoItems, nil)
+  RH.state.padStock["FARP OUTLAW"].missiles["weapons.missiles.AGM_114K"] = 6
+  RH.logistics.clearCarriedStock()
+  T.eq(RH.state.padStock["FARP OUTLAW"].missiles["weapons.missiles.AGM_114K"], 6)
+end)
+
+T.test("a pad that has not been written yet is not read back, so the default 100 is not saved", function()
+  T.fresh()
+  RH.state.padStock["FARP OUTLAW"] = { fuelKg = 0, missiles = {}, granted = true }
+  RH.dcs.farpPads = function() return { "FARP OUTLAW" } end
+  RH.dcs.readPadStock = function()
+    return { fuelKg = 0, missiles = { ["weapons.missiles.AGM_114K"] = 100 } }
+  end
+  RH.logistics.capturePads()
+  T.eq(next(RH.state.padStock["FARP OUTLAW"].missiles), nil)
+  RH.logistics.padHold["FARP OUTLAW"] = -1
+  RH.logistics.capturePads()
+  T.eq(RH.state.padStock["FARP OUTLAW"].missiles["weapons.missiles.AGM_114K"], 100)
+end)
+
+T.test("seeding a pad fills the shelf and sets air-to-ground weapons to the saved amount or zero", function()
+  T.fresh()
+  local saved = RH.dcs
+  local savedWorld = world
+  world = { event = setmetatable({}, { __index = function() return 0 end }) }
+  dofile("src/rh/dcs.lua")
+  world = savedWorld
+  local seed = RH.dcs.seedFarpSupplies
+  RH.dcs = saved
+  ENUMS = { Storage = { weapons = {
+    missiles = { AGM_114K = "weapons.missiles.AGM_114K", AIM_9X = "weapons.missiles.AIM_9X" },
+    bombs = { MK82 = "weapons.bombs.Mk_82" },
+    nurs = { HYDRA = "weapons.nurs.HYDRA_70_M151" },
+  } } }
+  local written = {}
+  seed({ setItem = function(_, item, count) written[item] = count end }, { missiles = { ["weapons.missiles.AGM_114K"] = 4 } })
+  ENUMS = nil
+  T.eq(written["weapons.missiles.AGM_114K"], 4)
+  T.eq(written["weapons.missiles.AIM_9X"], 99)
+  T.eq(written["weapons.bombs.Mk_82"], 0)
+  T.eq(written["weapons.nurs.HYDRA_70_M151"], 999)
 end)
 
 T.test("FARP Mustang keeps the Humvee east of the tent and deletes the extra", function()

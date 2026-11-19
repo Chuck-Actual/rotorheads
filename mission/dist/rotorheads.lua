@@ -1519,11 +1519,11 @@ function dcs.writePadStock(name, stock)
   return true
 end
 
-function dcs.restockPad(name)
+function dcs.restockPad(name, stock)
   local wh = dcs.farpWarehouse(name)
   if not wh then return false end
   dcs.topUpAirframes(wh)
-  dcs.seedFarpSupplies(wh)
+  dcs.seedFarpSupplies(wh, stock)
   return true
 end
 
@@ -1589,20 +1589,32 @@ function dcs.applyWarehouse(farp, wh)
     end
   end
   dcs.topUpAirframes(wh)
-  dcs.seedFarpSupplies(wh)
+  dcs.seedFarpSupplies(wh, { missiles = farp.ammoItems })
 end
 
-function dcs.seedFarpSupplies(wh)
+-- A limited warehouse with no weapon list gives every weapon the editor default of 100.
+-- Shelf items get their supply count. Air-to-ground missiles, bombs, and torpedoes get the saved amount, or 0.
+function dcs.seedFarpSupplies(wh, stock)
   local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
-  if not weapons or not RH.logistics or not RH.logistics.farpSupplyCount then return end
-  for category, group in pairs(weapons) do
-    if type(group) == "table" then
-      for _, item in pairs(group) do
-        local count = RH.logistics.farpSupplyCount(category, item)
-        if count then pcall(function() wh:setItem(item, count) end) end
+  if not weapons or not RH.logistics or not RH.logistics.farpSupplyCount or not wh or not wh.setItem then return end
+  local saved = stock and stock.missiles or {}
+  local function visit(category, group)
+    if type(group) ~= "table" then return end
+    for _, item in pairs(group) do
+      if type(item) == "table" then
+        visit(category, item)
+      elseif type(item) == "string" then
+        local count
+        if RH.logistics.keepHauledWeapon(item) then
+          count = type(saved[item]) == "number" and saved[item] or 0
+        else
+          count = RH.logistics.farpSupplyCount(category, item)
+        end
+        if type(count) == "number" then pcall(function() wh:setItem(item, count) end) end
       end
     end
   end
+  for category, group in pairs(weapons) do visit(category, group) end
 end
 
 function dcs.topUpAirframes(wh)
@@ -2553,6 +2565,11 @@ function logistics.spawnBuilt()
 end
 
 function logistics.captureStocks()
+  if RH.dcs.farpPads then
+    for _, name in ipairs(RH.dcs.farpPads()) do
+      if logistics.padHold[name] == nil then logistics.writeLimitedStock(name) end
+    end
+  end
   logistics.capturePads()
 end
 
@@ -2600,7 +2617,18 @@ end
 
 -- One launch clears every saved FARP tank. Later deliveries stay, including across the next restart.
 function logistics.clearCarriedStock()
-  if RH.state.warehouseReset == 1 then return end
+  if RH.state.warehouseReset == 1 then
+    -- An empty weapon list in the campaign file made DCS report 100 of every weapon, and that 100 was saved as a delivery.
+    if RH.state.a2gDefaultCleared then return end
+    for _, saved in pairs(RH.state.padStock or {}) do
+      if type(saved) == "table" then saved.missiles = {} end
+    end
+    for _, farp in pairs(RH.state.farps or {}) do
+      if type(farp) == "table" and not farp.lc then farp.ammoItems = nil end
+    end
+    RH.state.a2gDefaultCleared = true
+    return
+  end
   local wipe = {
     ["weapons.missiles.AGM_114K"] = 0,
     ["weapons.missiles.AGM_114L"] = 0,
@@ -2623,14 +2651,16 @@ function logistics.clearCarriedStock()
   RH.state.padStock = {}
   RH.state.warehouseWipe = wipe
   RH.state.warehouseReset = 1
+  RH.state.a2gDefaultCleared = true
 end
 
 function logistics.writeLimitedStock(name)
   if not logistics.padIsLimited(name) or not RH.dcs.writePadStock then return end
   local stock = logistics.stockToWrite(name)
-  RH.dcs.writePadStock(name, stock)
-  if RH.dcs.restockPad then RH.dcs.restockPad(name) end
-  if logistics.padHold[name] == nil then logistics.padHold[name] = RH.dcs.now() + 25 end
+  local wrote = RH.dcs.writePadStock(name, stock)
+  if RH.dcs.restockPad then RH.dcs.restockPad(name, stock) end
+  -- Nothing is read back until this write has had time to replace the default 100s.
+  if wrote and logistics.padHold[name] == nil then logistics.padHold[name] = RH.dcs.now() + 25 end
 end
 
 function logistics.syncPads()
@@ -2661,8 +2691,9 @@ function logistics.capturePads()
     for _, name in ipairs(RH.dcs.farpPads()) do names[name] = true end
   end
   for name in pairs(names) do
-    local held = logistics.padHold[name] and RH.dcs.now() < logistics.padHold[name]
-    if logistics.padIsLimited(name) and not held then
+    local hold = logistics.padHold[name]
+    local ready = hold ~= nil and RH.dcs.now() >= hold
+    if logistics.padIsLimited(name) and ready then
       local saved = RH.state.padStock and RH.state.padStock[name]
       local tracked = saved and saved.missiles
       if not tracked and RH.state.farps[name] then tracked = RH.state.farps[name].ammoItems end

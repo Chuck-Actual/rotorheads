@@ -872,11 +872,11 @@ function dcs.writePadStock(name, stock)
   return true
 end
 
-function dcs.restockPad(name)
+function dcs.restockPad(name, stock)
   local wh = dcs.farpWarehouse(name)
   if not wh then return false end
   dcs.topUpAirframes(wh)
-  dcs.seedFarpSupplies(wh)
+  dcs.seedFarpSupplies(wh, stock)
   return true
 end
 
@@ -942,20 +942,32 @@ function dcs.applyWarehouse(farp, wh)
     end
   end
   dcs.topUpAirframes(wh)
-  dcs.seedFarpSupplies(wh)
+  dcs.seedFarpSupplies(wh, { missiles = farp.ammoItems })
 end
 
-function dcs.seedFarpSupplies(wh)
+-- A limited warehouse with no weapon list gives every weapon the editor default of 100.
+-- Shelf items get their supply count. Air-to-ground missiles, bombs, and torpedoes get the saved amount, or 0.
+function dcs.seedFarpSupplies(wh, stock)
   local weapons = ENUMS and ENUMS.Storage and ENUMS.Storage.weapons
-  if not weapons or not RH.logistics or not RH.logistics.farpSupplyCount then return end
-  for category, group in pairs(weapons) do
-    if type(group) == "table" then
-      for _, item in pairs(group) do
-        local count = RH.logistics.farpSupplyCount(category, item)
-        if count then pcall(function() wh:setItem(item, count) end) end
+  if not weapons or not RH.logistics or not RH.logistics.farpSupplyCount or not wh or not wh.setItem then return end
+  local saved = stock and stock.missiles or {}
+  local function visit(category, group)
+    if type(group) ~= "table" then return end
+    for _, item in pairs(group) do
+      if type(item) == "table" then
+        visit(category, item)
+      elseif type(item) == "string" then
+        local count
+        if RH.logistics.keepHauledWeapon(item) then
+          count = type(saved[item]) == "number" and saved[item] or 0
+        else
+          count = RH.logistics.farpSupplyCount(category, item)
+        end
+        if type(count) == "number" then pcall(function() wh:setItem(item, count) end) end
       end
     end
   end
+  for category, group in pairs(weapons) do visit(category, group) end
 end
 
 function dcs.topUpAirframes(wh)
