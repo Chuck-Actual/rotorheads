@@ -350,6 +350,10 @@ RH.config = {
     boardMaxSeconds = 60,
     -- Smoke and flare reach any pilot inside this distance. The menu lists them so you can pick one.
     signalRadius = 10000,
+    -- A crash, ejection, or stranded crew inside this distance of a FARP pad does not leave a pilot there.
+    blockFarp = 400,
+    -- The same block around an airfield beacon. It covers the runway and the pads.
+    blockAirfield = 2500,
   },
 
   mash = {
@@ -1661,6 +1665,7 @@ local EXCLUDE_PREFIXES = {
   "Convoy escort",
   "Mi-26 ",
   "RH Pilot ",
+  "Downed Pilot",
 }
 
 function world.excluded(name)
@@ -4956,7 +4961,8 @@ RH = RH or {}
 local util = RH.util
 
 -- MOOSE CSAR setup plus the Rotorheads extras: lives returned on rescue, MASH capacity of 30,
--- MASH -> airfield transport tasks, stranded-crew CSARs, and the -extract marker.
+-- MASH -> airfield transport tasks, stranded-crew CSARs, the -extract marker, and a no-spawn
+-- block around FARPs and airfields so a crash on a pad does not leave a pilot on it.
 local csar = { instance = nil, manifests = {}, duty = {} }
 RH.csar = csar
 
@@ -5060,7 +5066,16 @@ function csar.installHooks(inst)
   local stockHandler = inst._EventHandler
   function inst:_EventHandler(event)
     local player = event and event.IniPlayerName
-    local crash = event and (event.id == EVENTS.PilotDead or event.id == EVENTS.Ejection)
+    local point = csar.eventPoint(event)
+    local where = point and csar.blocked(point)
+    if csar.isSpawnEvent(event) and csar.eventIsAircraft(event) and where then
+      local who = player or "A pilot"
+      local place = where == "airfield" and "an airfield" or "a FARP"
+      RH.dcs.message("blue", string.format("No CSAR. %s went down at %s.", who, place), 12)
+      csar.clearBlocked()
+      return
+    end
+    local crash = event and EVENTS and (event.id == EVENTS.PilotDead or event.id == EVENTS.Ejection)
     local hidden = {}
     if crash and player then
       for _, pilot in pairs(self.downedPilots or {}) do
@@ -5075,7 +5090,26 @@ function csar.installHooks(inst)
       if type(pilot.player) == "string" and string.sub(pilot.player, 1, 1) == "\1" then pilot.player = name end
     end
     if crash and player then csar.trimPlayerPilots(player) end
+    csar.clearBlocked()
     if not ok then error(err) end
+  end
+
+  -- Crash, ejection, zone spawn, and disembark all come through here.
+  if inst._AddCsar then
+    local stockAdd = inst._AddCsar
+    function inst:_AddCsar(coalitionSide, country, point, ...)
+      local pos = csar.coordPoint(point)
+      if pos and csar.blocked(pos) then return end
+      return stockAdd(self, coalitionSide, country, point, ...)
+    end
+  end
+  if inst.SpawnCSARAtZone then
+    local stockZone = inst.SpawnCSARAtZone
+    function inst:SpawnCSARAtZone(zone, ...)
+      local pos = csar.coordPoint(zone)
+      if pos and csar.blocked(pos) then return end
+      return stockZone(self, zone, ...)
+    end
   end
 
   local stockStatus = inst._CheckWoundedGroupStatus
@@ -5138,6 +5172,14 @@ function csar.installHooks(inst)
   end
 
   inst:ScheduleOnce(2, csar.watch, inst)
+  local function sweepPads()
+    local n = csar.clearBlocked()
+    if n > 0 then
+      RH.dcs.message("blue", string.format("Removed %d downed pilot%s from FARP pads and airfields.", n, n == 1 and "" or "s"), 15)
+    end
+    RH.after(30, sweepPads)
+  end
+  RH.after(12, sweepPads)
 end
 
 -- A full MASH stops accepting rescues until a transport task empties it.
@@ -5156,8 +5198,133 @@ function csar.refreshMashAvailability()
   end
 end
 
+-- "farp" or "airfield" when a downed pilot must not be left at this point.
+function csar.blocked(point)
+  if type(point) ~= "table" then return nil end
+  local ok, pos = pcall(util.toVec2, point)
+  if not ok or type(pos) ~= "table" or pos.x == nil then return nil end
+  local cfg = RH.config.csar or {}
+  local farpRadius = cfg.blockFarp or 400
+  local fieldRadius = cfg.blockAirfield or 2500
+  if RH.state and RH.state.farps then
+    for _, farp in pairs(RH.state.farps) do
+      if farp.x and util.distance(farp, pos) <= farpRadius then return "farp" end
+      for _, lp in ipairs(farp.loadPoints or {}) do
+        if util.distance(lp, pos) <= farpRadius then return "farp" end
+      end
+    end
+  end
+  if RH.dcs and RH.dcs.airbases then
+    for _, ab in ipairs(RH.dcs.airbases() or {}) do
+      if ab.point and ab.coalition ~= "red" then
+        local field = ab.kind == "airdrome" and ab.logistics ~= false
+        local radius = field and fieldRadius or farpRadius
+        if util.distance(ab.point, pos) <= radius then return field and "airfield" or "farp" end
+      end
+    end
+  end
+  return nil
+end
+
+function csar.coordPoint(point)
+  if type(point) ~= "table" then return nil end
+  if point.GetVec2 then
+    local got, v = pcall(function() return point:GetVec2() end)
+    if got and type(v) == "table" then return util.toVec2(v) end
+  end
+  if point.GetCoordinate then
+    local got, coord = pcall(function() return point:GetCoordinate() end)
+    if got and type(coord) == "table" and coord ~= point then
+      local nested = csar.coordPoint(coord)
+      if nested then return nested end
+    end
+  end
+  if point.x ~= nil then
+    local got, v = pcall(util.toVec2, point)
+    if got then return v end
+  end
+  return nil
+end
+
+function csar.eventPoint(event)
+  if not event then return nil end
+  local unit = event.IniUnit or event.initiator
+  local pos = csar.coordPoint(unit)
+  if pos then return pos end
+  return csar.coordPoint(event.IniVec3 or event.pos)
+end
+
+function csar.isSpawnEvent(event)
+  if not event or event.id == nil or not EVENTS then return false end
+  return event.id == EVENTS.PilotDead or event.id == EVENTS.Ejection
+    or event.id == EVENTS.Dead or event.id == EVENTS.Crash
+end
+
+function csar.eventIsAircraft(event)
+  local cat = event and event.IniCategory
+  if cat == nil and event and type(event.initiator) == "table" and event.initiator.getDesc then
+    local got, desc = pcall(event.initiator.getDesc, event.initiator)
+    if got and type(desc) == "table" then cat = desc.category end
+  end
+  if Unit and Unit.Category then
+    if cat == Unit.Category.AIRPLANE or cat == Unit.Category.HELICOPTER then return true end
+  end
+  if cat == 0 or cat == 1 then return true end
+  if EVENTS and event and (event.id == EVENTS.PilotDead or event.id == EVENTS.Ejection or event.id == EVENTS.Crash) then
+    return true
+  end
+  return false
+end
+
+function csar.isPilotGroupName(name)
+  if type(name) ~= "string" then return false end
+  if name == "RH_TPL_DOWNED_PILOT" then return false end
+  if string.sub(name, 1, 9) == "RH Pilot " then return true end
+  if string.sub(name, 1, 12) == "Downed Pilot" then return true end
+  return false
+end
+
+function csar.removeDowned(inst, pilot)
+  if not pilot then return end
+  pilot.alive = false
+  if pilot.group and pilot.group.Destroy then pcall(function() pilot.group:Destroy(false) end) end
+  if pilot.name and RH.dcs.destroyGroup then RH.dcs.destroyGroup(pilot.name) end
+  if inst and inst._RemoveNameFromDownedPilots and pilot.name then
+    pcall(function() inst:_RemoveNameFromDownedPilots(pilot.name, true) end)
+  end
+end
+
+-- Deletes downed pilots already standing on a pad or an airfield, including ones loaded from the CSAR save.
+function csar.clearBlocked()
+  local removed = 0
+  local inst = csar.instance
+  local seen = {}
+  if inst then
+    for _, pilot in pairs(inst.downedPilots or {}) do
+      if pilot.alive ~= false then
+        local pos = csar.positionOf(pilot)
+        if pos and csar.blocked(pos) then
+          if pilot.name then seen[pilot.name] = true end
+          csar.removeDowned(inst, pilot)
+          removed = removed + 1
+        end
+      end
+    end
+  end
+  if RH.dcs.groundRoster then
+    for _, obj in ipairs(RH.dcs.groundRoster()) do
+      if obj.name and not seen[obj.name] and csar.isPilotGroupName(obj.name) and csar.blocked(obj) then
+        seen[obj.name] = true
+        RH.dcs.destroyGroup(obj.name)
+        removed = removed + 1
+      end
+    end
+  end
+  return removed
+end
+
 function csar.spawnStranded(pos, player, typeName)
-  if not csar.instance then return end
+  if not csar.instance or csar.blocked(pos) then return end
   local zone = ZONE_RADIUS:New("RH_STRANDED_" .. math.random(1, 1e6), util.toVec2(pos), 30, true)
   csar.instance:SpawnCSARAtZone(zone, coalition.side.BLUE, player, false, false, player, typeName, true)
 end
@@ -5552,6 +5719,11 @@ function csar.disembark(group)
   end
   if not csar.onGround(unit) then
     RH.dcs.messageToUnit(heliName, "Land before the pilots can get out.", 8)
+    return
+  end
+  local pos = unit.GetVec2 and unit:GetVec2()
+  if pos and csar.blocked(pos) then
+    RH.dcs.messageToUnit(heliName, "Pilots stay aboard. A FARP or airfield is not a place to leave them.", 10)
     return
   end
   local heading = unit:GetHeading() or 0

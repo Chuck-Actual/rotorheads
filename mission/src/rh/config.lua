@@ -140,6 +140,10 @@ RH.config = {
     boardMaxSeconds = 60,
     -- Smoke and flare reach any pilot inside this distance. The menu lists them so you can pick one.
     signalRadius = 10000,
+    -- A crash, ejection, or stranded crew inside this distance of a FARP pad does not leave a pilot there.
+    blockFarp = 400,
+    -- The same block around an airfield beacon. It covers the runway and the pads.
+    blockAirfield = 2500,
   },
 
   mash = {

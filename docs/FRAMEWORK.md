@@ -83,6 +83,8 @@ Each player MASH keeps a blue map mark that says `MASH`, sitting just east of th
 
 CSAR uses `RH_TPL_DOWNED_PILOT` and the MOOSE CSAR module. Drop-off is that tent, on the ground, within 150 m. A MASH holds 30 pilots. A full one stops taking rescues until a transport task frees slots.
 
+A crash, ejection, stranded crew, or disembark inside the block does not leave a downed pilot. The block is 400 m around every FARP pad and load point (`config.csar.blockFarp`), 400 m around a friendly ship or small pad, and 2500 m around a friendly airfield beacon (`config.csar.blockAirfield`). The pilot hears "No CSAR" and the life rules are unchanged. Pilots already standing in that block, including ones reloaded from the CSAR save, are deleted on launch and about every 30 seconds. `world` does not write `RH Pilot` or `Downed Pilot` groups into the next mission file.
+
 ### The rest
 
 Outposts, factories, red air, paratroopers, lives, map markers, convoys, and the live map each have their own module and start from `RH.start`. Red ground units in this build spawn from templates again. They are not saved and restored as live groups. That persistence was removed with the MASH rollback.

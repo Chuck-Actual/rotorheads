@@ -41,7 +41,7 @@ end
 
 _G.T = T
 
-local suites = { "test_util", "test_world", "test_miz", "test_markers", "test_logistics", "test_lives", "test_outposts", "test_factories", "test_convoy", "test_livemap", "test_hooks" }
+local suites = { "test_util", "test_world", "test_miz", "test_markers", "test_logistics", "test_lives", "test_csar", "test_outposts", "test_factories", "test_convoy", "test_livemap", "test_hooks" }
 for _, s in ipairs(suites) do
   print(s)
   dofile("tests/" .. s .. ".lua")

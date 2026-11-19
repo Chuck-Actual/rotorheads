@@ -20,6 +20,7 @@ local EXCLUDE_PREFIXES = {
   "Convoy escort",
   "Mi-26 ",
   "RH Pilot ",
+  "Downed Pilot",
 }
 
 function world.excluded(name)
