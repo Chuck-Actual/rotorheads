@@ -339,3 +339,20 @@ T.test("the fast checksum matches zlib", function()
     T.eq(miz.crc32(s), want, "crc of " .. #s .. " bytes")
   end
 end)
+
+T.test("the export works in the DCS hook environment, which has no io.type, io.stderr, os.remove or os.rename", function()
+  local saved = { iotype = io.type, stderr = io.stderr, remove = os.remove, rename = os.rename }
+  local dest = os.tmpname() .. " RH Campaign A.miz"
+  local worldText = '{ savedAt = 1700000000, baseline = {}, seen = {}, objects = {}, farps = { { name = "FARP Pinto", x = 41000, y = 12000, pending = true } }, pads = { ["FARP Pinto"] = 0 }, airframes = 999, helicopters = { "UH-1H" } }'
+  local ok, result, err = pcall(function()
+    local miz = loadMiz()
+    io.type, io.stderr, os.remove, os.rename = nil, nil, nil, nil
+    return miz.exportText("RH_Manual.miz", worldText, dest)
+  end)
+  io.type, io.stderr, os.remove, os.rename = saved.iotype, saved.stderr, saved.remove, saved.rename
+  T.ok(ok, tostring(result))
+  T.ok(result, tostring(err))
+  local dir, names = unpack(readFile(dest))
+  T.ok(names["mission"] and names["warehouses"], "the campaign file opens")
+  T.ok(readFile(dir .. "/mission"):find("FARP Pinto", 1, true), "the marked FARP is in it")
+end)

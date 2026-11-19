@@ -55,6 +55,12 @@ function Find-SavedGamesDir {
   throw "Could not find $($names -join ' or ') under '$root'. Start DCS once so it creates the folder, or pass -SavedGamesDir."
 }
 
+# A registry entry can point at a drive that no longer exists. Join-Path throws on that, so test each path quietly.
+function Test-DcsDir($p) {
+  if (-not $p) { return $false }
+  try { return (Test-Path -LiteralPath ([IO.Path]::Combine($p, "Scripts\MissionScripting.lua"))) } catch { return $false }
+}
+
 function Find-DcsInstallDir {
   if ($DcsInstallDir) { return $DcsInstallDir }
   $keys = if ($Server) {
@@ -64,15 +70,15 @@ function Find-DcsInstallDir {
   }
   foreach ($k in $keys) {
     $p = (Get-ItemProperty -Path $k -ErrorAction SilentlyContinue).Path
-    if ($p -and (Test-Path (Join-Path $p "Scripts\MissionScripting.lua"))) { return $p }
+    if (Test-DcsDir $p) { return $p }
   }
-  $guesses = @(
-    "C:\Program Files\Eagle Dynamics\DCS World",
-    "C:\Program Files\Eagle Dynamics\DCS World Server",
-    "C:\Program Files (x86)\Steam\steamapps\common\DCSWorld"
-  )
+  $guesses = if ($Server) {
+    @("D:\Games\DCS World Server", "C:\Program Files\Eagle Dynamics\DCS World Server")
+  } else {
+    @("D:\Games\DCS World", "C:\Program Files\Eagle Dynamics\DCS World", "C:\Program Files (x86)\Steam\steamapps\common\DCSWorld")
+  }
   foreach ($p in $guesses) {
-    if (Test-Path (Join-Path $p "Scripts\MissionScripting.lua")) { return $p }
+    if (Test-DcsDir $p) { return $p }
   }
   throw "Could not find the DCS install folder. Pass -DcsInstallDir 'D:\path\to\DCS World'."
 }

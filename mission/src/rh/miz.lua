@@ -760,13 +760,16 @@ function miz.exportText(missionPath, worldText, destPath)
   if not ok or type(world) ~= "table" then return nil, "world save unreadable" end
   local bytes, exportErr = miz.exportBytes(mizBytes, world)
   if not bytes then return nil, exportErr end
-  local tmp = destPath .. ".tmp"
+  local canRename = os and os.rename and os.remove
+  local tmp = canRename and destPath .. ".tmp" or destPath
   local out = io.open(tmp, "wb")
   if not out then return nil, "cannot write " .. tmp end
   out:write(bytes)
   out:close()
-  os.remove(destPath)
-  if os.rename(tmp, destPath) == nil then return nil, "cannot replace " .. destPath end
+  if canRename then
+    os.remove(destPath)
+    if os.rename(tmp, destPath) == nil then return nil, "cannot replace " .. destPath end
+  end
   return true
 end
 

@@ -170,7 +170,12 @@ if NATIVE_BITOPS then
 end
 
 local function warn(s)
- io.stderr:write(s, '\n')
+ if io and io.stderr then io.stderr:write(s, '\n') end
+end
+
+-- The DCS hook environment has io.open but no io.type.
+local function is_file(o)
+ return type(o) == 'userdata' and io and io.type ~= nil and io.type(o) == 'file'
 end
 
 local function debug(...)
@@ -345,7 +350,7 @@ local function get_bitstream(o)
  local bs
  if is_bitstream[o] then
  return o
- elseif io.type(o) == 'file' then
+ elseif is_file(o) then
  bs = bitstream_from_bytestream(bytestream_from_file(o))
  elseif type(o) == 'string' then
  bs = bitstream_from_bytestream(bytestream_from_string(o))
@@ -359,7 +364,7 @@ end
 
 local function get_obytestream(o)
  local bs
- if io.type(o) == 'file' then
+ if is_file(o) then
  bs = function(sbyte) o:write(string_char(sbyte)) end
  elseif type(o) == 'function' then
  bs = o

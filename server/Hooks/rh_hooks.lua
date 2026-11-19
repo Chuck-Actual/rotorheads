@@ -324,6 +324,14 @@ local function exportEditor()
   end
 end
 
+-- A crash inside the export goes into last_export.txt too, not only dcs.log.
+local function runExport()
+  local ok, err = pcall(exportEditor)
+  if ok then return end
+  log("editor export error: " .. tostring(err))
+  pcall(writeNote, nil, "Campaign mission was not built. The hook " .. RHHook.version .. " hit an error:\r\n" .. tostring(err))
+end
+
 local SHUTDOWN = "if RH and RH.shutdown then RH.shutdown() end"
 
 -- The restart hosts the campaign file that was just written, so built FARPs load as real pads.
@@ -331,8 +339,7 @@ local function restart(reason)
   log("restarting mission: " .. reason)
   toMission(SHUTDOWN)
   RHHook.lastExport = nil
-  local ok, err = pcall(exportEditor)
-  if not ok then log("editor export error: " .. tostring(err)) end
+  runExport()
   local target = RHHook.lastExport or DCS.getMissionFilename()
   log("loading " .. tostring(target))
   net.load_mission(target)
@@ -340,8 +347,7 @@ end
 
 function RHHook.onSimulationStop()
   if DCS.getModelTime and DCS.getModelTime() > 1 then
-    local ok, err = pcall(exportEditor)
-    if not ok then log("editor export error: " .. tostring(err)) end
+    runExport()
   end
   if not RHHook.shutdownSent then
     RHHook.shutdownSent = true
@@ -385,8 +391,7 @@ function RHHook.onSimulationFrame()
   RHHook.lastCheck = now
   if DCS.getModelTime() > 1 and now - (RHHook.lastEditorExport or 0) >= 30 then
     RHHook.lastEditorExport = now
-    local ok, err = pcall(exportEditor)
-    if not ok then log("editor export error: " .. tostring(err)) end
+    runExport()
   end
   if not DCS.isServer() or not DCS.isMultiplayer() then return end
 
@@ -457,7 +462,7 @@ function RHHook.writeStatus(line)
   pcall(writeText, path, text .. "\r\n")
 end
 
-RHHook.version = "2026-11-18b"
+RHHook.version = "2026-11-18c"
 RHHook.loadedAt = os.date("%Y-%m-%d %H:%M:%S")
 DCS.setUserCallbacks(RHHook)
 RHHook.writeStatus()
