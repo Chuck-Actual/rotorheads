@@ -4,9 +4,10 @@ The scripts find everything by name, so the mission file only needs objects plac
 Nothing has to be scripted by hand. Start with one factory, one outpost, two areas of operation and one FARP,
 check it works, then grow the map.
 
-Units you build during a flight are written to `RH_Editor.miz` beside the mission (see
-[LOCAL_TESTING.md](LOCAL_TESTING.md)). Open that copy to inspect or repair them. Editing the original file
-does not show those units.
+This page builds the starting mission (`RH Manual.miz`). Once the war is running, the server hook writes it
+into `RH Campaign A.miz` or `RH Campaign B.miz` beside the mission (see [LOCAL_TESTING.md](LOCAL_TESTING.md)).
+Open the newest one to inspect, add, move, or delete units and FARPs, save it under the same name, and host it.
+Leave the hidden trigger zone `RH_SAVE_COPY` in place: it tells the campaign that the file is a save.
 
 The examples use the **Syria** map (Latakia → Aleppo front, as on Rotorheads), but any map works.
 
@@ -108,7 +109,7 @@ Other:
 
 Rotorheads uses **dynamic slots**. On each FARP / airfield you want players to spawn at, open the warehouse
 settings, enable *Dynamic Spawn*, and allow the airframes you want (UH-1H, UH-60L, Mi-8, CH-47F, AH-64D, Ka-50,
-Mi-24P, OH-58D, Gazelle, C-130J…). FARPs built in-game are spawned with dynamic slots enabled.
+Mi-24P, OH-58D, Gazelle, C-130J…). FARPs built in-game are written into the campaign file as pads with dynamic slots enabled.
 
 Add the ships as normal ship groups. If you name the units `Tarawa` and `Theodore Roosevelt` (or change
 `ships` in `config.lua`) they become crate and troop load points.

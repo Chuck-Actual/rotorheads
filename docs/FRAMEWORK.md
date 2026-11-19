@@ -7,8 +7,8 @@ Agents read this before editing. When you change a mechanic, update that mechani
 - Open new agents on this same project. `.cursor/rules/dcs-host.mdc` is always applied and points here.
 - Stay inside the mechanic you were asked about. FARP warehouse and pad stock are not part of a CTLD task.
 - Edit `mission/src/rh/*.lua`. From `mission/`, run `lua5.1 tests/run.lua` and then `lua5.1 tools/build.lua`. Commit `mission/dist/rotorheads.lua` with the source change.
-- The owner replaces `C:\Users\Hill\Saved Games\DCS\Missions\Rotorheads\rotorheads.lua`, quits the mission to the main menu, and hosts `RH Manual.miz` again. Replacing the script does not reload a mission that is already running.
-- Do not tell the owner to open the mission in the editor and save it unless they asked for an editor change. A save from the editor rewrites the FARP warehouse checkboxes.
+- The owner replaces `C:\Users\Hill\Saved Games\DCS\Missions\Rotorheads\rotorheads.lua`, quits the mission to the main menu, and hosts the newest `RH Campaign A.miz` or `RH Campaign B.miz` (see Campaign files). Replacing the script does not reload a mission that is already running.
+- Editor changes go into the newest campaign file, saved under the same name with the server stopped. `RH Manual.miz` is only the start of a fresh war.
 
 ## What runs
 
@@ -28,11 +28,22 @@ Agents read this before editing. When you change a mechanic, update that mechani
 | --- | --- |
 | `Missions\Rotorheads\rotorheads.lua` | The campaign script the mission loads. |
 | `Missions\Rotorheads\Moose_.lua` | MOOSE. Load it before the campaign script. |
-| `Missions\RH Manual.miz` | The hosted mission. FARP warehouse flags live in its `warehouses` file. |
+| `Missions\RH Manual.miz` | The start of a fresh war. FARP warehouse flags live in its `warehouses` file. |
+| `Missions\RH Campaign A.miz`, `RH Campaign B.miz` | The war written back into a mission by the hook. The newest one is hosted and is the one to open in the editor. |
 | `Saved Games\DCS\rotorheads\campaign.lua` | The war: FARPs, lives, factories, pad stock. |
 | `Saved Games\DCS\rotorheads\world.lua` | Ground units and statics captured from the running mission. |
 
 `static1-4` and `static1-5` are the editor FARP pads (unit ids 1000011 and 1000023). The mission editor names statics that way. They are heliports, not a script group. Their warehouse entries must keep `dynamicSpawn = true` and `unlimitedFuel`, `unlimitedMunitions`, and `unlimitedAircrafts` false. `mission/tools/patch_farp_warehouses.py` rewrites those two entries. Writing `0` with `setLiquidAmount` or `setItem` does not turn an unlimited warehouse into an empty one.
+
+## Campaign files
+
+`server/Hooks/rh_hooks.lua` writes the war into a mission about every 30 seconds and when the mission stops. It uses `mission/src/rh/miz.lua`, installed beside the hook as `rh_miz.lua`. The hosted file is locked, so it writes the other one of `RH Campaign A.miz` and `RH Campaign B.miz` (from `RH Manual.miz` it writes the older slot). The scheduled restart hosts the file it just wrote. On the first frame, before the campaign script loads, a hosted slot that is older than the other slot is swapped for the newer one. Paths come from `lfs.writedir()`, so the same hook works in `Saved Games\DCS` and in `Saved Games\DCS.dcs_serverrelease` on another PC.
+
+`miz.patch` works from `world.lua`. A group already in the file is moved in place and keeps its ids and warehouse. A name in `baseline` or `seen` that is no longer alive leaves the file, with its warehouse entry. A FARP in `world.farps` with no pad yet, including one marked this session, is written as a `Heliports` static (`FARP`, `FARPS`, dynamic spawn, hot start allowed) plus its `config.farp.services` pieces. Each new pad gets a `warehouses` entry: limited fuel, munitions, and aircraft, 999 of each helicopter, no planes, and `jet_fuel.InitFuel` set from the saved kilograms in tons. A logistics center pad gets the unlimited entry. Pads already in the file only have `InitFuel` updated. `persistence/` is dropped from the copy. The trigger zone `RH_SAVE_COPY` marks the file as a save, with property `savedAt` set to the world save time.
+
+When `RH_SAVE_COPY` is present, `world.restore` keeps the units as they are in the file: nothing is respawned, moved back, or removed, and new editor units are adopted. `logistics.dropDeletedFarps` retires a built FARP whose pad is gone (deleted in the editor), and moves the record of a pad that was moved. A marked FARP with no pad still spawns from script. When `savedAt` is more than 5 minutes older than the world save, the file is treated as stale: the old restore runs and the host is told to use the newer file.
+
+A FARP built during a session is spawned at once only on the next restart, when it is already in the mission file. DCS does not finish setting up a heliport created by a script after mission start.
 
 ## Mechanics
 
@@ -46,7 +57,7 @@ Not in this build, and not to be assumed: an "all crates or one crate" menu, a f
 
 ### FARPs and logistics
 
-Player FARPs are marked in the mission and spawned on a later start by `logistics.spawnBuilt` through `SPAWNSTATIC:InitFARP` (dynamic spawn on, and hot start left as a player choice). A pad with hot start locked off forces every spawn cold and hides that switch. The dynamic spawn screen is where the player picks the helicopter, the pylon loadout, and hot or cold. Air-to-ground missiles are not on that shelf until a delivery is in the warehouse. `RH_FARP_Bassel` in the current save is the logistics center at the tent, and it is not built.
+Player FARPs are marked in the mission and written into the next campaign file as real pads (see Campaign files). `logistics.spawnBuilt` only fills the warehouse of a pad that is already there. When the hosted file has no pad for it, it falls back to `SPAWNSTATIC:InitFARP` (dynamic spawn on, and hot start left as a player choice). A pad with hot start locked off forces every spawn cold and hides that switch. The dynamic spawn screen is where the player picks the helicopter, the pylon loadout, and hot or cold. Air-to-ground missiles are not on that shelf until a delivery is in the warehouse. `RH_FARP_Bassel` in the current save is the logistics center at the tent, and it is not built.
 
 The editor pads and player-built pads share one warehouse rule. `warehouseReset` is a one-time clear: the first launch after that flag is missing writes 0 kg of jet fuel and 0 of the saved air-to-ground missiles, including the old Hellfire and Vikhr grant, then sets the flag. A later delivery is saved and comes back on the next launch. A new pad starts with 0 kg of jet fuel and no air-to-ground missiles. Guns, rockets, pods, air-to-air missiles, and helicopter dynamic-spawn slots are written back to the high shelf counts on each launch. Fuel and air-to-ground missiles are not. `logistics.capturePads` reads the live warehouse about every 30 seconds, after a 25 second hold so the startup write cannot be saved as an empty tank. The numbers land on `RH.state.padStock` and on that FARP's `liquids` and `ammoItems`. The next launch writes those numbers back. A count at or above one million is treated as unlimited and is not saved. A logistics center pad is not written, so the airfield warehouse stays unlimited.
 
@@ -81,3 +92,5 @@ Outposts, factories, red air, paratroopers, lives, map markers, convoys, and the
 - Do not rebuild a FARP with `coalition.addGroup`. The dynamic-spawn list uses `coalition.addStaticObject` with `dynamicSpawn = true`, or the pad already saved in the mission.
 - Do not zero a warehouse to make it limited.
 - Do not respawn units from `persistence/Rotorheads.json` inside a `.miz`.
+- Do not export over the mission that is being hosted. Write the other campaign slot.
+- Do not compute the zip checksum bit by bit. The hook runs on the host's main thread every 30 seconds.

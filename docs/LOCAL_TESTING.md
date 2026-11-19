@@ -13,7 +13,7 @@ Players spawn with **dynamic slots** at blue airfields and FARPs, so there are n
 | `%USERPROFILE%\Saved Games\DCS\Missions\Rotorheads\` | `rotorheads.lua` and `Moose_.lua` (copied by the install script). Save your `.miz` here too. |
 | `%USERPROFILE%\Saved Games\DCS\Scripts\Hooks\rh_hooks.lua` | The server hook (chat commands, restart timer). Copied by the install script. |
 | `%USERPROFILE%\Saved Games\DCS\rotorheads\` | Campaign saves (`campaign.lua`, `world.lua`, `ctld.csv`, `csar.csv`) and `livemap.json`. **Delete it to start a fresh war.** |
-| `%USERPROFILE%\Saved Games\DCS\Missions\RH_Editor.miz` | A copy of the running mission with the saved ground units, FARPs, and statics written in. This is the Missions folder the editor opens, not the Rotorheads subfolder. The mission you launched is left unchanged. |
+| `%USERPROFILE%\Saved Games\DCS\Missions\RH Campaign A.miz` and `RH Campaign B.miz` | The war written back into a mission: units, statics, and every FARP as a real pad with its warehouse. Host the newest one. Open it in the Mission Editor to change the war. |
 | `%USERPROFILE%\Saved Games\DCS\Logs\dcs.log` | The log. Every campaign line starts with `[RH]`. |
 | `<DCS install>\Scripts\MissionScripting.lua` | Must be edited so the campaign can save (the install script does it). |
 
@@ -145,20 +145,23 @@ Do these in order. Stop at the first one that fails and send me what happened (s
 
 ## Saves and the Mission Editor
 
-The running mission is not the file the editor has open. Units built after launch (Humvees, crates, FARP pads)
-live in the simulation until they are written out. Every 30 seconds, and again when you leave, the script
-records ground units, ships, statics, and FARP warehouses into `world.lua`. The next launch puts back anything
-that is missing, and removes an editor-placed ground unit that was destroyed.
+Every 30 seconds, and again when the mission stops, the server hook writes the war into a mission file beside
+the one you host: `RH Campaign A.miz` or `RH Campaign B.miz`. The file being hosted is locked, so it always
+writes the other one. Player-built FARPs are written in as real pads with their own warehouse (dynamic spawn,
+saved jet fuel, 999 of each helicopter), so DCS treats them like a pad placed in the editor.
 
-While the mission is hosted, the server hook writes `Saved Games\DCS\Missions\RH_Editor.miz` beside
-`RH Test.miz`. Stop the server before opening that file in the Mission Editor. One DCS install cannot
-host and edit at the same time. If the server was started from `RH_Editor.miz`, the new copy is
-`RH_Editor_latest.miz`, because the file being hosted stays locked. The result of the last attempt is
-`Saved Games\DCS\Missions\Rotorheads\last_export.txt`. DCS's own Esc, Save Mission has to use a new
-filename. Saving on top of the mission that is open leaves a stuck `.writing` file.
+- Host the newest campaign file. The automatic restart does this by itself. If you host the older one, the hook
+  loads the newer one before the campaign starts.
+- Host `RH Manual.miz` only to start a fresh war, after deleting `Saved Games\DCS\rotorheads`.
+- To change the war: stop the server, open the newest campaign file in the Mission Editor, add, move, or delete
+  units, FARP pads, or warehouse settings, save it under the same name, and host it. What the file holds is what
+  loads: a deleted vehicle stays deleted, and a deleted FARP pad retires that FARP and frees its name.
+- A FARP marked during a flight comes up on the next restart, already in the file.
+- Do not use Esc, Save Mission over the open mission. It leaves a stuck `.writing` file.
 
-Re-run `tools\windows\install.ps1` after this update so the hook that writes `RH_Editor.miz` is installed.
-DCS has to be restarted before a new hook loads.
+The result of the last write is `Saved Games\DCS\Missions\Rotorheads\last_export.txt`. Re-run
+`tools\windows\install.ps1` after an update so the hook and `rh_miz.lua` are current. DCS has to be restarted
+before a new hook loads.
 
 ## Step 6: When something is wrong
 
@@ -183,12 +186,17 @@ and restart the mission.
 
 ## Later: moving to the dedicated server
 
-When the mission works locally:
+The hook finds every path from the Saved Games folder it runs in, so the same files work on another PC.
 
-1. On the Windows VM, install the DCS dedicated server and the Syria map, clone this project there too, and run
-   the install script as Administrator with `-Server -Desanitize`. That targets
-   `Saved Games\DCS.dcs_serverrelease\`.
-2. Copy `RH_Test.miz` (or your final mission) into
-   `Saved Games\DCS.dcs_serverrelease\Missions\Rotorheads\` on the VM.
-3. Copy your local `Saved Games\DCS\rotorheads\` folder over too if you want to keep the war you started.
-4. Start the server with that mission (web GUI or `serverSettings.lua`, see `server/serverSettings.example.lua`).
+1. On the server PC, install the DCS dedicated server and the map, clone this project, and run the install script
+   as Administrator with `-Server -Desanitize`. That targets `Saved Games\DCS.dcs_serverrelease\`. Run
+   `-Desanitize` again after every DCS update.
+2. Stop the mission on this PC. Copy both `RH Campaign A.miz` and `RH Campaign B.miz` from
+   `Saved Games\DCS\Missions\` into `Saved Games\DCS.dcs_serverrelease\Missions\` on the server.
+3. Copy the `Saved Games\DCS\rotorheads\` folder to `Saved Games\DCS.dcs_serverrelease\rotorheads\`. That is
+   the rest of the war: FARP records, fuel and missiles, lives, and crate counts.
+4. Put either campaign file in the server's mission list (web GUI or `serverSettings.lua`, see
+   `server/serverSettings.example.lua`). The hook switches to the newer one on the first frame, and every
+   restart after that hosts the file it just wrote.
+5. To edit the war later, stop the server, copy the newest campaign file to a PC with the Mission Editor, edit
+   and save it under the same name, and copy it back. The newest file is hosted.
