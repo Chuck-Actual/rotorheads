@@ -223,8 +223,20 @@ T.test("a marked FARP goes into RH Manual.miz as a real pad with a limited dynam
   T.eq(entry.jet_fuel.InitFuel, 2.5, "the saved 2500 kg shows as 2.5 tons in the editor")
   T.eq(entry.aircrafts.helicopters["CH-47Fbl1"].initialAmount, 999)
   T.eq(entry.aircrafts.planes["C-130J-30"], nil)
-  T.eq(wh.warehouses[1000011].jet_fuel.InitFuel, 0.9, "the editor pad keeps its entry and shows its saved fuel")
-  T.eq(wh.warehouses[1000023].dynamicSpawn, true)
+  local srcDir = unpack(readFile("RH_Manual.miz"))
+  local before = assert(miz.loadTable(readFile(srcDir .. "/warehouses"), "warehouses"))
+  local editorPadId = staticsNamed(assert(miz.loadMission(readFile(srcDir .. "/mission"))))["static1-4#group"].units[1].unitId
+  for id, old in pairs(before.warehouses) do
+    local new = wh.warehouses[id]
+    T.ok(new, "editor warehouse " .. tostring(id) .. " is kept")
+    T.eq(new.dynamicSpawn, old.dynamicSpawn)
+    T.eq(new.unlimitedFuel, old.unlimitedFuel)
+  end
+  local editorEntry = wh.warehouses[editorPadId]
+  if editorEntry.unlimitedFuel == false then
+    T.eq(editorEntry.jet_fuel.InitFuel, 0.9, "the editor pad shows its saved fuel")
+  end
+  os.execute(string.format("rm -rf %q", srcDir))
   local zones = {}
   for _, z in pairs(mission.triggers.zones) do zones[z.name] = z end
   T.ok(zones.RH_SAVE_COPY, "the save marker is written")
