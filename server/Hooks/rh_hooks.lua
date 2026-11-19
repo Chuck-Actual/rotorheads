@@ -106,8 +106,15 @@ local function modified(path)
   return attr and attr.modification or nil
 end
 
-function RHHook.slotTarget(source)
-  local dir = splitPath(source)
+-- Campaign files always go to Saved Games\Missions, where the host looks for them, even when DCS runs the mission from a temp copy.
+function RHHook.campaignDir(source)
+  local root = lfs.writedir and withSlash(lfs.writedir())
+  if root then return root .. "Missions" end
+  return (splitPath(source))
+end
+
+function RHHook.slotTarget(source, dir)
+  dir = dir or splitPath(source)
   if not dir then return nil end
   local running = slotIndex(source)
   if running then return dir .. "\\" .. RHHook.slots[3 - running] end
@@ -120,13 +127,14 @@ function RHHook.slotTarget(source)
 end
 
 -- Hosting the older slot by mistake would roll the war back. The newer slot wins.
-function RHHook.newerSlot(source)
+function RHHook.newerSlot(source, dir)
   local running = slotIndex(source)
   if not running then return nil end
-  local dir = splitPath(source)
+  dir = dir or splitPath(source)
+  local mine = dir .. "\\" .. RHHook.slots[running]
   local other = dir .. "\\" .. RHHook.slots[3 - running]
-  local mine, theirs = modified(source), modified(other)
-  if mine and theirs and theirs > mine then return other end
+  local mineTime, theirs = modified(mine) or modified(source), modified(other)
+  if mineTime and theirs and theirs > mineTime then return other end
   return nil
 end
 
@@ -295,7 +303,7 @@ local function exportEditor()
     writeNote(source, "Campaign mission was not built.\r\n" .. tostring(packerErr))
     return
   end
-  local dest = RHHook.slotTarget(source)
+  local dest = RHHook.slotTarget(source, RHHook.campaignDir(source))
   local _, destName = splitPath(dest)
   local ok, err = packer.exportText(source, worldText, dest)
   if ok then
@@ -342,6 +350,8 @@ function RHHook.onSimulationStop()
 end
 
 function RHHook.onSimulationStart()
+  local ok, name = pcall(DCS.getMissionFilename)
+  RHHook.writeStatus("Mission started. DCS reports the mission file as " .. tostring(ok and name or "unknown") .. ".")
   RHHook.warned = {}
   RHHook.shutdownSent = false
   RHHook.emptySince = nil
@@ -353,7 +363,7 @@ end
 local function checkSlot()
   RHHook.slotChecked = true
   local source = findSource()
-  local newer = source and RHHook.newerSlot(source)
+  local newer = source and RHHook.newerSlot(source, RHHook.campaignDir(source))
   if newer then
     RHHook.switching = true
     log("hosting " .. source .. " but " .. newer .. " is newer, loading that instead")
@@ -436,5 +446,19 @@ function RHHook.onPlayerTrySendChat(playerID, msg, all)
   return msg
 end
 
+-- Proof the hook is running. If this file's time is older than the last DCS start, DCS did not load the hook.
+function RHHook.writeStatus(line)
+  if not lfs.writedir then return end
+  local path = withSlash(lfs.writedir()) .. "Missions\\Rotorheads\\hook_status.txt"
+  local text = "Rotorheads hook " .. RHHook.version .. " loaded " .. RHHook.loadedAt
+    .. "\r\nSaved Games folder: " .. tostring(lfs.writedir())
+    .. "\r\nGame folder: " .. tostring(lfs.currentdir and lfs.currentdir())
+  if line then text = text .. "\r\n" .. os.date("%Y-%m-%d %H:%M:%S") .. " " .. line end
+  pcall(writeText, path, text .. "\r\n")
+end
+
+RHHook.version = "2026-11-18b"
+RHHook.loadedAt = os.date("%Y-%m-%d %H:%M:%S")
 DCS.setUserCallbacks(RHHook)
-log("loaded")
+RHHook.writeStatus()
+log("loaded " .. RHHook.version)

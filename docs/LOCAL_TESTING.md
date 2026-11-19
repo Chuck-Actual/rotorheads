@@ -159,7 +159,9 @@ saved jet fuel, 999 of each helicopter), so DCS treats them like a pad placed in
 - A FARP marked during a flight comes up on the next restart, already in the file.
 - Do not use Esc, Save Mission over the open mission. It leaves a stuck `.writing` file.
 
-The result of the last write is `Saved Games\DCS\Missions\Rotorheads\last_export.txt`. Re-run
+The result of the last write is `Saved Games\DCS\Missions\Rotorheads\last_export.txt`. The hook also
+writes `hook_status.txt` there each time DCS loads it and each time a mission starts. If that file is older than
+the last DCS start, the hook is not loaded. Re-run
 `tools\windows\install.ps1` after an update so the hook and `rh_miz.lua` are current. DCS has to be restarted
 before a new hook loads.
 

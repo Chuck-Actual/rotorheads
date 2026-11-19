@@ -819,3 +819,31 @@ T.test("a built FARP's tent left behind in the editor is not a new FARP", functi
   for _ in pairs(RH.state.farps) do count = count + 1 end
   T.eq(count, 1)
 end)
+
+T.test("crates and vehicles sitting on FARP landing spots are cleared so dynamic spawn has room", function()
+  local w = T.fresh()
+  local pad = { x = 40763.79, y = 9580.98 }
+  local function at(dx, dy) return { x = pad.x + dx, y = pad.y + dy } end
+  w.statics["static1-4"] = { alive = true, typeName = "FARP", side = "blue", point = at(0, 0) }
+  w.statics["static1-11"] = { alive = true, typeName = "ammo_cargo", side = "blue", point = at(22, 23) }
+  w.statics["static1-6"] = { alive = true, typeName = "Windsock", side = "blue", point = at(50, 0) }
+  w.statics["static1"] = { alive = true, typeName = "FARP Fuel Depot", side = "blue", point = at(-37, -65) }
+  w.statics["static1-7"] = { alive = true, typeName = "FARP Tent", side = "blue", point = at(0, -70) }
+  w.statics["FARP Outlaw"] = { alive = true, typeName = "FARP", side = "blue", point = { x = 60000, y = 0 } }
+  w.statics["CTLD crate 7"] = { alive = true, typeName = "container_cargo", side = "neutral", point = { x = 60010, y = 5 } }
+  w.statics["Far crate"] = { alive = true, typeName = "ammo_cargo", side = "blue", point = at(0, 300) }
+  w.units = {
+    { name = "vehicle1-3", typeName = "Hummer", side = "blue", ground = true, pos = at(0, -45) },
+    { name = "Built Abrams", typeName = "M-1 Abrams", side = "blue", ground = true, pos = at(8, 4) },
+  }
+  RH.state.farps["FARP Outlaw"] = { name = "FARP Outlaw", label = "FARP Outlaw", x = 60000, y = 0, built = true }
+  local removed = RH.logistics.clearPads()
+  table.sort(removed)
+  T.eq(table.concat(removed, ","), "Built Abrams,CTLD crate 7,static1-11")
+  T.ok(not w.statics["static1-11"].alive, "the editor ammo crate on static1-4 goes")
+  T.ok(w.statics["static1-4"].alive and w.statics["FARP Outlaw"].alive, "pads stay")
+  T.ok(w.statics["static1-6"].alive and w.statics["static1"].alive and w.statics["static1-7"].alive, "service pieces stay")
+  T.ok(w.statics["Far crate"].alive, "crates away from the pad stay")
+  T.eq(#w.destroyedUnits, 1)
+  T.eq(#RH.logistics.clearPads(), 0, "a second pass finds nothing")
+end)

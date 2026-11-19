@@ -108,7 +108,10 @@ function fake.new()
   function dcs.groupPosition(name) return w.groups[name] and w.groups[name].pos end
   function dcs.groupLanded(name) return w.groups[name] and w.groups[name].landed or false end
   function dcs.destroyGroup(name) if w.groups[name] then w.groups[name].alive = 0 end end
-  function dcs.destroyUnit(name) table.insert(w.destroyedUnits, name) end
+  function dcs.destroyUnit(name)
+    table.insert(w.destroyedUnits, name)
+    for _, u in ipairs(w.units) do if u.name == name then u.alive = false end end
+  end
   function dcs.destroyWeapon(weapon) table.insert(w.destroyedWeapons, weapon) end
 
   local function spawnAir(template, from, alias, kind)

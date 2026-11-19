@@ -26,6 +26,9 @@ The owner hosts a LAN multiplayer server from the DCS client on the same PC. The
 - For a dedicated server on another PC, copy both campaign files to its `Missions` folder and the `rotorheads` folder beside them. The hook uses `lfs.writedir()`.
 - `D:\Games\DCS World\Scripts\MissionScripting.lua` must keep `sanitizeModule('os')`, `sanitizeModule('io')`, and `sanitizeModule('lfs')` commented out. A DCS update puts those lines back. The server copy of that file is separate.
 
+- Nothing may sit within 40 m of a FARP pad. Crates there blow up or hot-start dynamic spawns. The mission clears them at launch.
+- `Missions\Rotorheads\hook_status.txt` shows whether the hook loaded. `last_export.txt` shows the last campaign write.
+
 ## Scripting
 
 - A hook `net.dostring_in('mission', 'return ...')` does not see mission globals. Call mission code with `a_do_script`.

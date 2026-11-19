@@ -24,6 +24,17 @@ local function loadHook(files, mission)
     writedir = function() return "C:\\Saved\\" end,
     mkdir = function() end,
   }
+  local realOpen = REAL_IO_OPEN or io.open
+  REAL_IO_OPEN = realOpen
+  -- Paths like C:\\Saved stay off the disk for every hook callback, not only while the file loads.
+  io.open = function(path, mode)
+    if type(path) == "string" and path:match("^%a:") then
+      state.writes = state.writes or {}
+      state.writes[#state.writes + 1] = path
+      return nil
+    end
+    return realOpen(path, mode)
+  end
   dofile("../server/Hooks/rh_hooks.lua")
   return hook, state
 end
@@ -64,4 +75,17 @@ T.test("hosting the newest slot, or RH Manual.miz, does not switch", function()
   hook.onSimulationStart()
   hook.onSimulationFrame()
   T.eq(state.loaded, nil)
+end)
+
+T.test("a mission run from a temp copy still writes the campaign file into Saved Games Missions", function()
+  local temp = "C:\\Users\\Hill\\AppData\\Local\\Temp\\DCS\\RH Campaign A.miz"
+  local hook = loadHook({ [temp] = 100, [A] = 100, [B] = 200 }, temp)
+  T.eq(hook.campaignDir(temp), DIR)
+  T.eq(hook.slotTarget(temp, hook.campaignDir(temp)), B)
+  T.eq(hook.newerSlot(temp, hook.campaignDir(temp)), B, "the newer B in Missions wins over the temp copy of A")
+end)
+
+T.test("the hook leaves hook_status.txt so the host can see it loaded", function()
+  local _, state = loadHook({}, MANUAL)
+  T.eq(state.writes and state.writes[1], "C:\\Saved\\Missions\\Rotorheads\\hook_status.txt")
 end)

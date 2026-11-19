@@ -111,6 +111,10 @@ Rotorheads uses **dynamic slots**. On each FARP / airfield you want players to s
 settings, enable *Dynamic Spawn*, and allow the airframes you want (UH-1H, UH-60L, Mi-8, CH-47F, AH-64D, Ka-50,
 Mi-24P, OH-58D, Gazelle, C-130J…). FARPs built in-game are written into the campaign file as pads with dynamic slots enabled.
 
+Keep the four landing spots empty. A crate under a spawn spot blows up the helicopter, and one beside it
+starts the helicopter running a foot in the air. At launch the mission removes any static object within 40 m of
+a FARP pad and any vehicle within 35 m. Put tents, depots, windsocks, and Humvees 45 m out or farther.
+
 Add the ships as normal ship groups. If you name the units `Tarawa` and `Theodore Roosevelt` (or change
 `ships` in `config.lua`) they become crate and troop load points.
 

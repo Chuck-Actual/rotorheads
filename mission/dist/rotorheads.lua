@@ -2099,6 +2099,54 @@ function logistics.discoverEditorPads()
   end
 end
 
+-- Dynamic spawn needs the four landing spots empty. A helicopter placed into a crate explodes, and one
+-- placed on top of a crate starts running a foot in the air. Service pieces stand 45 m out or farther.
+logistics.PAD_CLEAR_STATIC = 40
+logistics.PAD_CLEAR_UNIT = 35
+
+function logistics.clearPads()
+  if not RH.dcs.staticObjects then return {} end
+  local statics = RH.dcs.staticObjects()
+  local pads, keep = {}, {}
+  for _, static in ipairs(statics) do
+    local kind = static.typeName or ""
+    if kind == "FARP" or kind == "Invisible FARP" or kind == "SINGLE_HELIPAD" or kind == "FARP_SINGLE_01" then
+      pads[#pads + 1] = static
+      keep[static.name] = true
+    end
+  end
+  for farpName in pairs(RH.state.farps) do
+    for piece in pairs(logistics.pieceNames(farpName)) do keep[piece] = true end
+  end
+  local removed = {}
+  for _, pad in ipairs(pads) do
+    for _, static in ipairs(statics) do
+      if not keep[static.name] and util.distance(static, pad) <= logistics.PAD_CLEAR_STATIC then
+        keep[static.name] = true
+        RH.dcs.destroyStatic(static.name)
+        removed[#removed + 1] = static.name
+        util.log("cleared %s (%s) off pad %s", static.name, static.typeName or "?", pad.name)
+      end
+    end
+    if RH.dcs.groundUnitsInRadius and RH.dcs.destroyUnit then
+      for _, side in ipairs({ "blue", "neutral", "red" }) do
+        for _, unit in ipairs(RH.dcs.groundUnitsInRadius(side, pad, logistics.PAD_CLEAR_UNIT) or {}) do
+          if not keep[unit.name] and not logistics.isServiceHumvee(unit) then
+            keep[unit.name] = true
+            RH.dcs.destroyUnit(unit.name)
+            removed[#removed + 1] = unit.name
+            util.log("cleared %s (%s) off pad %s", unit.name, unit.typeName or "?", pad.name)
+          end
+        end
+      end
+    end
+  end
+  if #removed > 0 and RH.dcs.message then
+    RH.dcs.message("all", string.format("ROTORHEADS: cleared %d crate(s) or vehicle(s) sitting on FARP landing spots so helicopters can spawn.", #removed), 20)
+  end
+  return removed
+end
+
 -- "FARP Pinto Tent" belongs to FARP Pinto even after the pad is moved away from it in the editor.
 function logistics.pieceOfKnownFarp(name)
   if type(name) ~= "string" then return false end
@@ -3027,12 +3075,14 @@ function logistics.start()
   logistics.spawnBuilt()
   logistics.equipEditorFarps()
   logistics.trimHumvees()
+  logistics.clearPads()
   logistics.syncPads()
   if RH.after then
     local function catchLatePads()
       logistics.discoverEditorPads()
       logistics.equipEditorFarps()
       logistics.trimHumvees()
+      logistics.clearPads()
       logistics.syncPads()
       logistics.refreshMapLabels()
       logistics.refreshMashLabels()
