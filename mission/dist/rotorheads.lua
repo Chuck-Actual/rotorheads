@@ -327,7 +327,7 @@ RH.config = {
       "COPPERHEAD", "RATTLESNAKE", "MUSTANG", "LONGBOW", "DAGGER",
       "OUTLAW", "WARHORSE", "SWITCHBLADE", "IRONCLAD", "GHOST",
     },
-    -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
+    -- Helicopters are restocked to this count on each launch. Fuel and air-to-ground missiles are not.
     airframes = 999,
     -- On the shelf for every helicopter: guns, rounds, rockets, pylons, pods, and air-to-air missiles.
     -- Air-to-ground missiles and fuel are not stocked. APKs stay out.
@@ -1466,6 +1466,7 @@ function dcs.spawnFarp(farp)
     end
   end
   local function fill()
+    if farp.lc then return end
     local warehouse = dcs.farpWarehouse(farp.name)
     if warehouse then dcs.applyWarehouse(farp, warehouse) end
   end
@@ -1485,10 +1486,13 @@ end
 function dcs.writePadStock(name, stock)
   local wh = dcs.farpWarehouse(name)
   if not wh or type(stock) ~= "table" then return false end
-  if wh.setLiquidAmount then pcall(function() wh:setLiquidAmount(0, stock.fuelKg or 0) end) end
+  -- A missing fuel figure stays untouched. Zero is a real empty tank and is written.
+  if wh.setLiquidAmount and type(stock.fuelKg) == "number" and stock.fuelKg >= 0 and stock.fuelKg < 1000000 then
+    pcall(function() wh:setLiquidAmount(0, stock.fuelKg) end)
+  end
   if wh.setItem then
     for item, amount in pairs(stock.missiles or {}) do
-      if type(item) == "string" and type(amount) == "number" and amount >= 0 then
+      if RH.logistics and RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount >= 0 and amount < 1000000 then
         pcall(function() wh:setItem(item, amount) end)
       end
     end
@@ -1496,15 +1500,49 @@ function dcs.writePadStock(name, stock)
   return true
 end
 
+function dcs.restockPad(name)
+  local wh = dcs.farpWarehouse(name)
+  if not wh then return false end
+  dcs.topUpAirframes(wh)
+  dcs.seedFarpSupplies(wh)
+  return true
+end
+
+-- Jet fuel is liquid 0. Counts at or above one million are the unlimited flag, not a delivery.
 function dcs.readPadStock(name, tracked)
   local wh = dcs.farpWarehouse(name)
-  if not wh or not wh.getLiquidAmount or not wh.getItemCount then return nil end
-  local ok, fuel = pcall(function() return wh:getLiquidAmount(0) end)
-  if not ok or type(fuel) ~= "number" then return nil end
+  if not wh then return nil end
+  local inv
+  if wh.getInventory then
+    local okInv, got = pcall(function() return wh:getInventory() end)
+    if okInv and type(got) == "table" then inv = got end
+  end
+  local fuel
+  if wh.getLiquidAmount then
+    local ok, n = pcall(function() return wh:getLiquidAmount(0) end)
+    if ok and type(n) == "number" then fuel = n end
+  end
+  if fuel == nil and inv and type(inv.liquids) == "table" then
+    local n = inv.liquids[0] or inv.liquids["0"]
+    if type(n) == "number" then fuel = n end
+  end
+  if type(fuel) ~= "number" or fuel < 0 or fuel >= 1000000 then return nil end
   local missiles = {}
-  for item in pairs(tracked or {}) do
-    local okN, n = pcall(function() return wh:getItemCount(item) end)
-    if okN and type(n) == "number" then missiles[item] = n end
+  local function keep(item, amount)
+    if RH.logistics and RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 and amount < 1000000 then
+      missiles[item] = amount
+    end
+  end
+  if inv then
+    for item, amount in pairs(inv.weapon or inv.weapons or {}) do keep(item, amount) end
+  end
+  if wh.getItemCount then
+    for item in pairs(tracked or {}) do
+      if missiles[item] == nil then
+        local okN, n = pcall(function() return wh:getItemCount(item) end)
+        if okN then keep(item, n) end
+      end
+    end
   end
   return { fuelKg = fuel, missiles = missiles }
 end
@@ -1549,27 +1587,23 @@ function dcs.seedFarpSupplies(wh)
 end
 
 function dcs.topUpAirframes(wh)
+  if not wh or not wh.setItem then return end
   for typeName in pairs(RH.config.airframes or {}) do
     local count = RH.logistics.farpAirframeCount(typeName)
-    pcall(function() wh:setItem(typeName, count) end)
+    -- Fixed wing stays off the shelf. Writing 0 does not remove it from an unlimited warehouse.
+    if type(count) == "number" and count > 0 then
+      pcall(function() wh:setItem(typeName, count) end)
+    end
   end
 end
 
 -- Read the live warehouse. A failed read leaves the last saved fuel and ammo alone.
 function dcs.captureFarpStock(farp)
-  local wh = dcs.farpWarehouse(farp.name)
-  if not wh or not wh.getInventory then return false end
-  local ok, inv = pcall(function() return wh:getInventory() end)
-  if not ok or type(inv) ~= "table" then return false end
-  farp.liquids = inv.liquids or {}
-  local kept = {}
-  for item, amount in pairs(inv.weapon or inv.weapons or {}) do
-    if RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
-      kept[item] = amount
-    end
-  end
-  farp.ammoItems = kept
-  dcs.topUpAirframes(wh)
+  if not farp or farp.lc then return false end
+  local live = dcs.readPadStock(farp.name, farp.ammoItems)
+  if not live then return false end
+  farp.liquids = { [0] = live.fuelKg }
+  farp.ammoItems = live.missiles
   return true
 end
 
@@ -2031,8 +2065,7 @@ function logistics.discoverEditorPads()
   end
 end
 
--- The editor FARP already has the tent and the pad. It still needs the Humvee the rearm
--- window uses, and the pad warehouse needs fuel or defuel answers "unable to comply".
+-- The editor FARP already has the tent and the pad. It still needs the Humvee the rearm window uses.
 function logistics.equipEditorFarps()
   for _, farp in pairs(RH.state.farps) do
     if farp.editor and not farp.lc and not farp.pending then
@@ -2050,17 +2083,10 @@ function logistics.equipEditorFarps()
             if d <= 400 and (not padDist or d < padDist) then pad, padDist = ab, d end
           end
         end
-        if pad then
-          local stock = logistics.ensurePadStock(pad.name)
-          RH.dcs.writePadStock(pad.name, stock)
-        end
+        if pad then logistics.writeLimitedStock(pad.name) end
       end
-      if RH.dcs.writePadStock then
-        for _, site in ipairs(logistics.editorPads()) do
-          if util.distance(site, farp) <= 400 then
-            RH.dcs.writePadStock(site.name, logistics.ensurePadStock(site.name))
-          end
-        end
+      for _, site in ipairs(logistics.editorPads()) do
+        if util.distance(site, farp) <= 400 then logistics.writeLimitedStock(site.name) end
       end
     end
   end
@@ -2352,28 +2378,17 @@ function logistics.spawnBuilt()
 end
 
 function logistics.captureStocks()
-  if RH.dcs.captureFarpStock then
-    for name in pairs(logistics.sessionSpawned or {}) do
-      local farp = RH.state.farps[name]
-      if farp then RH.dcs.captureFarpStock(farp) end
-    end
-  end
   logistics.capturePads()
 end
 
--- One load for the editor pads (static1-4 and static1-5). Later restarts write the
--- saved figures back and do not add another 10 tons or another 40 missiles.
+-- Fuel and air-to-ground missiles are the only warehouse counts that carry across a restart.
+-- A logistics center is left on the mission's unlimited warehouse.
 logistics.padHold = {}
 
-function logistics.openingPadStock()
-  return {
-    fuelKg = 10000,
-    missiles = {
-      ["weapons.missiles.AGM_114K"] = 40,
-      ["weapons.missiles.AGM_114L"] = 40,
-      ["weapons.missiles.Vikhr_M"] = 40,
-    },
-  }
+function logistics.padIsLimited(name)
+  local farp = RH.state.farps and RH.state.farps[name]
+  if farp and farp.lc then return false end
+  return true
 end
 
 function logistics.ensurePadStock(name)
@@ -2382,36 +2397,63 @@ function logistics.ensurePadStock(name)
   if type(saved) == "table" and saved.granted and type(saved.fuelKg) == "number" and type(saved.missiles) == "table" then
     return saved, false
   end
-  local stock = logistics.openingPadStock()
-  stock.granted = true
+  local farp = RH.state.farps and RH.state.farps[name]
+  if farp and type(farp.liquids) == "table" then
+    local fuel = farp.liquids[0] or farp.liquids["0"]
+    if type(fuel) == "number" and fuel >= 0 and fuel < 1000000 then
+      local stock = { fuelKg = fuel, missiles = farp.ammoItems or {}, granted = true }
+      RH.state.padStock[name] = stock
+      return stock, false
+    end
+  end
+  local stock = { fuelKg = 0, missiles = {}, granted = true }
   RH.state.padStock[name] = stock
   return stock, true
 end
 
+function logistics.writeLimitedStock(name)
+  if not logistics.padIsLimited(name) or not RH.dcs.writePadStock then return end
+  local stock = logistics.ensurePadStock(name)
+  RH.dcs.writePadStock(name, stock)
+  if RH.dcs.restockPad then RH.dcs.restockPad(name) end
+  if logistics.padHold[name] == nil then logistics.padHold[name] = RH.dcs.now() + 25 end
+end
+
 function logistics.syncPads()
-  if not RH.dcs.farpPads or not RH.dcs.writePadStock then return end
-  local fresh = {}
+  if not RH.dcs.farpPads then return end
   for _, name in ipairs(RH.dcs.farpPads()) do
-    local stock, granted = logistics.ensurePadStock(name)
-    RH.dcs.writePadStock(name, stock)
-    if logistics.padHold[name] == nil then logistics.padHold[name] = RH.dcs.now() + 25 end
-    if granted then fresh[#fresh + 1] = name end
+    logistics.writeLimitedStock(name)
   end
-  if #fresh > 0 then
-    RH.dcs.message("blue", "One-time FARP stock, 10 tons of fuel and 40 AGM-114K, AGM-114L, and Vikhr: " .. table.concat(fresh, ", "), 30)
+end
+
+function logistics.storePadReading(name, live)
+  live.missiles = live.missiles or {}
+  live.granted = true
+  RH.state.padStock = RH.state.padStock or {}
+  RH.state.padStock[name] = live
+  local farp = RH.state.farps and RH.state.farps[name]
+  if farp and not farp.lc then
+    farp.liquids = { [0] = live.fuelKg }
+    farp.ammoItems = live.missiles
   end
 end
 
 function logistics.capturePads()
   if not RH.dcs.readPadStock then return end
-  RH.state.padStock = RH.state.padStock or {}
-  for name, saved in pairs(RH.state.padStock) do
-    if type(saved) == "table" and saved.granted and not (logistics.padHold[name] and RH.dcs.now() < logistics.padHold[name]) then
-      local live = RH.dcs.readPadStock(name, saved.missiles)
-      if live then
-        live.granted = true
-        RH.state.padStock[name] = live
-      end
+  local names = {}
+  for name in pairs(RH.state.padStock or {}) do names[name] = true end
+  for name in pairs(logistics.sessionSpawned or {}) do names[name] = true end
+  if RH.dcs.farpPads then
+    for _, name in ipairs(RH.dcs.farpPads()) do names[name] = true end
+  end
+  for name in pairs(names) do
+    local held = logistics.padHold[name] and RH.dcs.now() < logistics.padHold[name]
+    if logistics.padIsLimited(name) and not held then
+      local saved = RH.state.padStock and RH.state.padStock[name]
+      local tracked = saved and saved.missiles
+      if not tracked and RH.state.farps[name] then tracked = RH.state.farps[name].ammoItems end
+      local live = RH.dcs.readPadStock(name, tracked)
+      if live then logistics.storePadReading(name, live) end
     end
   end
 end

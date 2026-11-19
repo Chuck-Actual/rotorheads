@@ -117,7 +117,7 @@ RH.config = {
       "COPPERHEAD", "RATTLESNAKE", "MUSTANG", "LONGBOW", "DAGGER",
       "OUTLAW", "WARHORSE", "SWITCHBLADE", "IRONCLAD", "GHOST",
     },
-    -- Helicopters are restocked to this count every save, so the FARP does not run out of airframes.
+    -- Helicopters are restocked to this count on each launch. Fuel and air-to-ground missiles are not.
     airframes = 999,
     -- On the shelf for every helicopter: guns, rounds, rockets, pylons, pods, and air-to-air missiles.
     -- Air-to-ground missiles and fuel are not stocked. APKs stay out.

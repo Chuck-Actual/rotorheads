@@ -823,6 +823,7 @@ function dcs.spawnFarp(farp)
     end
   end
   local function fill()
+    if farp.lc then return end
     local warehouse = dcs.farpWarehouse(farp.name)
     if warehouse then dcs.applyWarehouse(farp, warehouse) end
   end
@@ -842,10 +843,13 @@ end
 function dcs.writePadStock(name, stock)
   local wh = dcs.farpWarehouse(name)
   if not wh or type(stock) ~= "table" then return false end
-  if wh.setLiquidAmount then pcall(function() wh:setLiquidAmount(0, stock.fuelKg or 0) end) end
+  -- A missing fuel figure stays untouched. Zero is a real empty tank and is written.
+  if wh.setLiquidAmount and type(stock.fuelKg) == "number" and stock.fuelKg >= 0 and stock.fuelKg < 1000000 then
+    pcall(function() wh:setLiquidAmount(0, stock.fuelKg) end)
+  end
   if wh.setItem then
     for item, amount in pairs(stock.missiles or {}) do
-      if type(item) == "string" and type(amount) == "number" and amount >= 0 then
+      if RH.logistics and RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount >= 0 and amount < 1000000 then
         pcall(function() wh:setItem(item, amount) end)
       end
     end
@@ -853,15 +857,49 @@ function dcs.writePadStock(name, stock)
   return true
 end
 
+function dcs.restockPad(name)
+  local wh = dcs.farpWarehouse(name)
+  if not wh then return false end
+  dcs.topUpAirframes(wh)
+  dcs.seedFarpSupplies(wh)
+  return true
+end
+
+-- Jet fuel is liquid 0. Counts at or above one million are the unlimited flag, not a delivery.
 function dcs.readPadStock(name, tracked)
   local wh = dcs.farpWarehouse(name)
-  if not wh or not wh.getLiquidAmount or not wh.getItemCount then return nil end
-  local ok, fuel = pcall(function() return wh:getLiquidAmount(0) end)
-  if not ok or type(fuel) ~= "number" then return nil end
+  if not wh then return nil end
+  local inv
+  if wh.getInventory then
+    local okInv, got = pcall(function() return wh:getInventory() end)
+    if okInv and type(got) == "table" then inv = got end
+  end
+  local fuel
+  if wh.getLiquidAmount then
+    local ok, n = pcall(function() return wh:getLiquidAmount(0) end)
+    if ok and type(n) == "number" then fuel = n end
+  end
+  if fuel == nil and inv and type(inv.liquids) == "table" then
+    local n = inv.liquids[0] or inv.liquids["0"]
+    if type(n) == "number" then fuel = n end
+  end
+  if type(fuel) ~= "number" or fuel < 0 or fuel >= 1000000 then return nil end
   local missiles = {}
-  for item in pairs(tracked or {}) do
-    local okN, n = pcall(function() return wh:getItemCount(item) end)
-    if okN and type(n) == "number" then missiles[item] = n end
+  local function keep(item, amount)
+    if RH.logistics and RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 and amount < 1000000 then
+      missiles[item] = amount
+    end
+  end
+  if inv then
+    for item, amount in pairs(inv.weapon or inv.weapons or {}) do keep(item, amount) end
+  end
+  if wh.getItemCount then
+    for item in pairs(tracked or {}) do
+      if missiles[item] == nil then
+        local okN, n = pcall(function() return wh:getItemCount(item) end)
+        if okN then keep(item, n) end
+      end
+    end
   end
   return { fuelKg = fuel, missiles = missiles }
 end
@@ -906,27 +944,23 @@ function dcs.seedFarpSupplies(wh)
 end
 
 function dcs.topUpAirframes(wh)
+  if not wh or not wh.setItem then return end
   for typeName in pairs(RH.config.airframes or {}) do
     local count = RH.logistics.farpAirframeCount(typeName)
-    pcall(function() wh:setItem(typeName, count) end)
+    -- Fixed wing stays off the shelf. Writing 0 does not remove it from an unlimited warehouse.
+    if type(count) == "number" and count > 0 then
+      pcall(function() wh:setItem(typeName, count) end)
+    end
   end
 end
 
 -- Read the live warehouse. A failed read leaves the last saved fuel and ammo alone.
 function dcs.captureFarpStock(farp)
-  local wh = dcs.farpWarehouse(farp.name)
-  if not wh or not wh.getInventory then return false end
-  local ok, inv = pcall(function() return wh:getInventory() end)
-  if not ok or type(inv) ~= "table" then return false end
-  farp.liquids = inv.liquids or {}
-  local kept = {}
-  for item, amount in pairs(inv.weapon or inv.weapons or {}) do
-    if RH.logistics.keepHauledWeapon(item) and type(amount) == "number" and amount > 0 then
-      kept[item] = amount
-    end
-  end
-  farp.ammoItems = kept
-  dcs.topUpAirframes(wh)
+  if not farp or farp.lc then return false end
+  local live = dcs.readPadStock(farp.name, farp.ammoItems)
+  if not live then return false end
+  farp.liquids = { [0] = live.fuelKg }
+  farp.ammoItems = live.missiles
   return true
 end
 

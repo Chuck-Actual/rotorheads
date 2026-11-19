@@ -12,24 +12,40 @@ local function setup()
   return w
 end
 
-T.test("a FARP pad is granted 10 tons and 40 missiles once, then restarts keep the saved count", function()
+T.test("a new FARP warehouse starts empty and a later launch keeps delivered fuel and Hellfires", function()
   T.fresh()
-  local stock, fresh = RH.logistics.ensurePadStock("static1-4")
+  local stock, fresh = RH.logistics.ensurePadStock("FARP COPPERHEAD")
   T.ok(fresh)
-  T.eq(stock.fuelKg, 10000)
-  T.eq(stock.missiles["weapons.missiles.AGM_114K"], 40)
-  T.eq(stock.missiles["weapons.missiles.AGM_114L"], 40)
-  T.eq(stock.missiles["weapons.missiles.Vikhr_M"], 40)
-  stock.fuelKg = 4000
-  stock.missiles["weapons.missiles.AGM_114K"] = 12
-  stock.missiles["weapons.missiles.AGM_114L"] = 7
-  stock.missiles["weapons.missiles.Vikhr_M"] = 0
-  local again, second = RH.logistics.ensurePadStock("static1-4")
+  T.eq(stock.fuelKg, 0)
+  T.eq(stock.missiles["weapons.missiles.AGM_114K"], nil)
+  stock.fuelKg = 2500
+  stock.missiles["weapons.missiles.AGM_114K"] = 8
+  local again, second = RH.logistics.ensurePadStock("FARP COPPERHEAD")
   T.ok(not second)
-  T.eq(again.fuelKg, 4000)
-  T.eq(again.missiles["weapons.missiles.AGM_114K"], 12)
-  T.eq(again.missiles["weapons.missiles.AGM_114L"], 7)
-  T.eq(again.missiles["weapons.missiles.Vikhr_M"], 0)
+  T.eq(again.fuelKg, 2500)
+  T.eq(again.missiles["weapons.missiles.AGM_114K"], 8)
+
+  RH.state.farps["LC Bassel"] = { name = "LC Bassel", lc = true }
+  local written = {}
+  RH.dcs.farpPads = function() return { "FARP COPPERHEAD", "LC Bassel" } end
+  RH.dcs.writePadStock = function(name, pad) written[name] = pad.fuelKg end
+  RH.dcs.restockPad = function(name) written[name .. "-shelf"] = true end
+  RH.logistics.syncPads()
+  T.eq(written["FARP COPPERHEAD"], 2500)
+  T.eq(written["LC Bassel"], nil)
+  T.eq(written["FARP COPPERHEAD-shelf"], true)
+
+  RH.logistics.padHold["FARP COPPERHEAD"] = nil
+  RH.dcs.readPadStock = function()
+    return {
+      fuelKg = 1800,
+      missiles = { ["weapons.missiles.AGM_114K"] = 6 },
+    }
+  end
+  RH.logistics.capturePads()
+  T.eq(RH.state.padStock["FARP COPPERHEAD"].fuelKg, 1800)
+  T.eq(RH.state.padStock["FARP COPPERHEAD"].missiles["weapons.missiles.AGM_114K"], 6)
+  T.eq(RH.state.padStock["LC Bassel"], nil)
 end)
 
 T.test("a new FARP starts with no crates and general supply is worth five", function()
@@ -110,7 +126,7 @@ T.test("an editor tent shows crates at startup, limits pulls, and gets one Humve
   RH.logistics.equipEditorFarps()
   RH.logistics.equipEditorFarps()
   T.eq(spawned[farp.name .. " Humvee"], "Hummer")
-  T.eq(fueled["static-pad"], 10000)
+  T.eq(fueled["static-pad"], 0)
   local n = 0
   for _ in pairs(spawned) do n = n + 1 end
   T.eq(n, 1)
