@@ -48,6 +48,90 @@ T.test("a new FARP warehouse starts empty and a later launch keeps delivered fue
   T.eq(RH.state.padStock["LC Bassel"], nil)
 end)
 
+T.test("saved FARP fuel and missiles are zeroed once, then a delivery stays", function()
+  T.fresh()
+  RH.state.farps["FARP MUSTANG"] = {
+    name = "FARP MUSTANG", x = 0, y = 0, coalition = "blue", built = true,
+    liquids = { [0] = 10000 },
+    ammoItems = { ["weapons.missiles.AGM_114K"] = 40 },
+  }
+  RH.state.farps["LC Bassel"] = {
+    name = "LC Bassel", lc = true, liquids = { [0] = 10000 },
+  }
+  RH.state.padStock["FARP MUSTANG"] = {
+    fuelKg = 10000,
+    missiles = { ["weapons.missiles.AGM_114K"] = 40, ["weapons.missiles.AGM_114"] = 2 },
+    granted = true,
+  }
+  RH.logistics.clearCarriedStock()
+  T.eq(RH.state.padStock["FARP MUSTANG"], nil)
+  T.eq(RH.state.farps["FARP MUSTANG"].liquids, nil)
+  T.eq(RH.state.farps["LC Bassel"].liquids[0], 10000)
+  T.eq(RH.state.warehouseReset, 1)
+  T.eq(RH.state.warehouseWipe["weapons.missiles.AGM_114K"], 0)
+  T.eq(RH.state.warehouseWipe["weapons.missiles.AGM_114"], 0)
+  T.eq(RH.state.warehouseWipe["weapons.missiles.Vikhr_M"], 0)
+
+  local written = {}
+  RH.dcs.writePadStock = function(name, stock) written[name] = stock end
+  RH.dcs.restockPad = function() end
+  RH.dcs.farpPads = function() return { "FARP MUSTANG" } end
+  RH.logistics.syncPads()
+  T.eq(written["FARP MUSTANG"].fuelKg, 0)
+  T.eq(written["FARP MUSTANG"].missiles["weapons.missiles.AGM_114K"], 0)
+  T.eq(written["FARP MUSTANG"].missiles["weapons.missiles.Vikhr_M"], 0)
+
+  RH.state.warehouseWipe = nil
+  RH.state.padStock["FARP MUSTANG"].fuelKg = 800
+  RH.state.padStock["FARP MUSTANG"].missiles["weapons.missiles.AGM_114K"] = 4
+  RH.logistics.clearCarriedStock()
+  T.eq(RH.state.padStock["FARP MUSTANG"].fuelKg, 800)
+  T.eq(RH.state.padStock["FARP MUSTANG"].missiles["weapons.missiles.AGM_114K"], 4)
+  RH.logistics.syncPads()
+  T.eq(written["FARP MUSTANG"].fuelKg, 800)
+  T.eq(written["FARP MUSTANG"].missiles["weapons.missiles.AGM_114K"], 4)
+  T.eq(written["FARP MUSTANG"].missiles["weapons.missiles.Vikhr_M"], nil)
+end)
+
+T.test("FARP Mustang keeps the Humvee east of the tent and deletes the extra", function()
+  local w = setup()
+  local farp = { name = "FARP MUSTANG", x = 1000, y = 2000, coalition = "blue", built = true }
+  RH.state.farps["FARP MUSTANG"] = farp
+  w.statics.tent = { alive = true, point = { x = 1000, y = 1930 }, typeName = "FARP Tent", display = "FARP Tent" }
+  local units = {
+    { name = "FARP MUSTANG Humvee", typeName = "Hummer", pos = { x = 1000, y = 1955 }, alive = true },
+    { name = "FARP 01 Humvee", typeName = "Hummer", pos = { x = 1000, y = 1900 }, alive = true },
+    { name = "RH_TPL_BLUE_HMMWV_JTAC#001", typeName = "Hummer", pos = { x = 1000, y = 1940 }, alive = true },
+  }
+  local destroyed = {}
+  RH.dcs.groundUnitsInRadius = function()
+    local out = {}
+    for _, unit in ipairs(units) do
+      if unit.alive then out[#out + 1] = { name = unit.name, typeName = unit.typeName, pos = unit.pos } end
+    end
+    return out
+  end
+  RH.dcs.destroyNamed = function(name)
+    destroyed[name] = true
+    for _, unit in ipairs(units) do if unit.name == name then unit.alive = false end end
+  end
+  RH.dcs.destroyUnit = function(name) destroyed[name] = true end
+  RH.dcs.objectExists = function(name)
+    for _, unit in ipairs(units) do if unit.name == name and unit.alive then return true end end
+    return false
+  end
+  local spawned = {}
+  RH.dcs.spawnVehicle = function(name) spawned[name] = true end
+  local spot = RH.logistics.humveePoint(farp)
+  T.eq(spot.y, 1955)
+  RH.logistics.oneHumvee(farp)
+  T.eq(destroyed["FARP 01 Humvee"], true)
+  T.eq(destroyed["FARP MUSTANG Humvee"], nil)
+  T.eq(destroyed["RH_TPL_BLUE_HMMWV_JTAC#001"], nil)
+  T.eq(spawned["FARP MUSTANG Humvee"], nil)
+  T.ok(not RH.logistics.isServiceHumvee({ name = "RH_TPL_BLUE_HMMWV_JTAC#001", typeName = "Hummer" }))
+end)
+
 T.test("a new FARP starts with no crates and general supply is worth five", function()
   setup()
   T.eq(RH.state.farps.RH_FARP_ALPHA.crates, 0)

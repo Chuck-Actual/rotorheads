@@ -367,6 +367,7 @@ local function staticGroup(obj, ids)
     unit.heliport_modulation = 0
     unit.heliport_callsign_id = 1
     unit.dynamicSpawn = true
+    unit.allowHotStart = true
   end
   return {
     name = obj.name,

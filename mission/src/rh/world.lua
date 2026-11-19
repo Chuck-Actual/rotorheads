@@ -38,9 +38,20 @@ end
 
 function world.farpOwned(name)
   if type(name) ~= "string" or not RH.state or not RH.state.farps then return false end
-  for farpName in pairs(RH.state.farps) do
-    if name == farpName or name:sub(1, #farpName + 1) == farpName .. " " then return true end
+  for farpName, farp in pairs(RH.state.farps) do
+    local labels = { farpName }
+    if type(farp) == "table" then
+      labels[#labels + 1] = farp.label
+      labels[#labels + 1] = farp.name
+    end
+    for _, label in ipairs(labels) do
+      if type(label) == "string" and label ~= "" then
+        if name == label or name:sub(1, #label + 1) == label .. " " then return true end
+      end
+    end
   end
+  -- A rename leaves the old service Humvee in the save. The FARP spawner places the current one.
+  if name:sub(1, 5) == "FARP " and name:sub(-7) == " Humvee" then return true end
   return false
 end
 

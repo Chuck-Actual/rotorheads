@@ -70,6 +70,7 @@ T.test("editor patch adds a Humvee, moves a tank, and deletes a dead one", funct
   local statics = mission.coalition.blue.country[1].static.group
   T.eq(statics[1].name, "FARP 01")
   T.eq(statics[1].units[1].dynamicSpawn, true)
+  T.eq(statics[1].units[1].allowHotStart, true)
   T.eq(statics[1].units[1].category, "Heliports")
 end)
 

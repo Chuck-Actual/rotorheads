@@ -8,6 +8,7 @@ RH.state = RH.state or {
   factories = {},
   outposts = {},
   farps = {},
+  padStock = {},
   mashes = {},
   blueOutposts = {},
   lives = {},

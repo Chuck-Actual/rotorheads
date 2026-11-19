@@ -538,6 +538,7 @@ RH.state = RH.state or {
   factories = {},
   outposts = {},
   farps = {},
+  padStock = {},
   mashes = {},
   blueOutposts = {},
   lives = {},
@@ -1379,6 +1380,8 @@ function dcs.spawnSnapshot(obj)
       data.heliport_modulation = 0
       data.heliport_callsign_id = 1
       data.dynamicSpawn = true
+      -- The player picks the aircraft, the pylons, and hot or cold. Omitting this forces a cold start.
+      data.allowHotStart = true
     end
     local ok = pcall(coalition.addStaticObject, obj.country or country.id.USA, data)
     return ok
@@ -1445,8 +1448,8 @@ function dcs.spawnFarp(farp)
   if not dcs.objectExists(farp.name) then
     local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
     helipad:InitShape("FARPS")
-    -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
-    helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
+    -- Dynamic spawn on, and hot start is a choice in that menu. The warehouse is filled from the save.
+    helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, true)
     helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
   end
   for _, piece in ipairs(RH.config.farp.services or {}) do
@@ -1664,9 +1667,20 @@ end
 
 function world.farpOwned(name)
   if type(name) ~= "string" or not RH.state or not RH.state.farps then return false end
-  for farpName in pairs(RH.state.farps) do
-    if name == farpName or name:sub(1, #farpName + 1) == farpName .. " " then return true end
+  for farpName, farp in pairs(RH.state.farps) do
+    local labels = { farpName }
+    if type(farp) == "table" then
+      labels[#labels + 1] = farp.label
+      labels[#labels + 1] = farp.name
+    end
+    for _, label in ipairs(labels) do
+      if type(label) == "string" and label ~= "" then
+        if name == label or name:sub(1, #label + 1) == label .. " " then return true end
+      end
+    end
   end
+  -- A rename leaves the old service Humvee in the save. The FARP spawner places the current one.
+  if name:sub(1, 5) == "FARP " and name:sub(-7) == " Humvee" then return true end
   return false
 end
 
@@ -2065,16 +2079,62 @@ function logistics.discoverEditorPads()
   end
 end
 
+-- East of the tent, between the tent and the pad. Bearing 90 is east in this map.
+function logistics.humveePoint(farp)
+  local tent = logistics.nearestTent(farp, 400)
+  if tent then return util.offset(tent, math.rad(90), 25) end
+  return util.offset(farp, math.rad(270), 45)
+end
+
+function logistics.isServiceHumvee(unit)
+  local name = unit.name or ""
+  if string.find(name, "RH_TPL_", 1, true) or string.find(name, "#", 1, true) then return false end
+  local kind = unit.typeName or ""
+  if kind == "Hummer" or kind == "M1025 HMMWV" then return true end
+  return string.sub(name, -7) == " Humvee"
+end
+
+-- One service Humvee per FARP. The keeper is the one already sitting just east of the tent.
+function logistics.oneHumvee(farp)
+  if not farp or farp.lc or farp.pending then return end
+  local point = logistics.humveePoint(farp)
+  local named = (farp.name or "FARP") .. " Humvee"
+  local keep
+  if RH.dcs.groundUnitsInRadius then
+    local bestDist
+    for _, unit in ipairs(RH.dcs.groundUnitsInRadius("blue", farp, 150) or {}) do
+      local pos = unit.pos or unit
+      if logistics.isServiceHumvee(unit) and util.distance(pos, point) <= 120 then
+        local d = util.distance(pos, point)
+        local nearer = not bestDist or d < bestDist - 0.5
+        local sameSpot = bestDist and math.abs(d - bestDist) <= 0.5 and unit.name == named
+        if nearer or sameSpot then keep, bestDist = unit.name, d end
+      end
+    end
+    for _, unit in ipairs(RH.dcs.groundUnitsInRadius("blue", farp, 150) or {}) do
+      local pos = unit.pos or unit
+      if unit.name ~= keep and logistics.isServiceHumvee(unit) and util.distance(pos, point) <= 120 then
+        if RH.dcs.destroyNamed then RH.dcs.destroyNamed(unit.name) end
+        if RH.dcs.destroyUnit then RH.dcs.destroyUnit(unit.name) end
+      end
+    end
+  end
+  if not keep and RH.dcs.objectExists and RH.dcs.spawnVehicle and not RH.dcs.objectExists(named) then
+    RH.dcs.spawnVehicle(named, "Hummer", point, 90)
+  end
+end
+
+function logistics.trimHumvees()
+  for _, farp in pairs(RH.state.farps or {}) do
+    logistics.oneHumvee(farp)
+  end
+end
+
 -- The editor FARP already has the tent and the pad. It still needs the Humvee the rearm window uses.
 function logistics.equipEditorFarps()
   for _, farp in pairs(RH.state.farps) do
     if farp.editor and not farp.lc and not farp.pending then
-      local tent = logistics.nearestTent(farp, 250)
-      local spot = util.offset(tent or farp, math.rad(tent and 180 or 270), tent and 25 or 45)
-      local humvee = farp.name .. " Humvee"
-      if RH.dcs.objectExists and RH.dcs.spawnVehicle and not RH.dcs.objectExists(humvee) then
-        RH.dcs.spawnVehicle(humvee, "Hummer", spot, 90)
-      end
+      logistics.oneHumvee(farp)
       if RH.dcs.airbases and RH.dcs.writePadStock then
         local pad, padDist
         for _, ab in ipairs(RH.dcs.airbases()) do
@@ -2411,9 +2471,48 @@ function logistics.ensurePadStock(name)
   return stock, true
 end
 
+function logistics.stockToWrite(name)
+  local stock = logistics.ensurePadStock(name)
+  local missiles = {}
+  for item, amount in pairs(stock.missiles or {}) do missiles[item] = amount end
+  if type(RH.state.warehouseWipe) == "table" then
+    for item, amount in pairs(RH.state.warehouseWipe) do
+      if missiles[item] == nil then missiles[item] = amount end
+    end
+  end
+  return { fuelKg = stock.fuelKg, missiles = missiles }
+end
+
+-- One launch clears every saved FARP tank. Later deliveries stay, including across the next restart.
+function logistics.clearCarriedStock()
+  if RH.state.warehouseReset == 1 then return end
+  local wipe = {
+    ["weapons.missiles.AGM_114K"] = 0,
+    ["weapons.missiles.AGM_114L"] = 0,
+    ["weapons.missiles.Vikhr_M"] = 0,
+  }
+  for _, saved in pairs(RH.state.padStock or {}) do
+    if type(saved) == "table" and type(saved.missiles) == "table" then
+      for item in pairs(saved.missiles) do wipe[item] = 0 end
+    end
+  end
+  for _, farp in pairs(RH.state.farps or {}) do
+    if type(farp) == "table" and not farp.lc then
+      if type(farp.ammoItems) == "table" then
+        for item in pairs(farp.ammoItems) do wipe[item] = 0 end
+      end
+      farp.liquids = nil
+      farp.ammoItems = nil
+    end
+  end
+  RH.state.padStock = {}
+  RH.state.warehouseWipe = wipe
+  RH.state.warehouseReset = 1
+end
+
 function logistics.writeLimitedStock(name)
   if not logistics.padIsLimited(name) or not RH.dcs.writePadStock then return end
-  local stock = logistics.ensurePadStock(name)
+  local stock = logistics.stockToWrite(name)
   RH.dcs.writePadStock(name, stock)
   if RH.dcs.restockPad then RH.dcs.restockPad(name) end
   if logistics.padHold[name] == nil then logistics.padHold[name] = RH.dcs.now() + 25 end
@@ -2861,14 +2960,17 @@ function logistics.start()
   logistics.dropStackedFarps()
   logistics.discoverEditorPads()
   logistics.assignFarpNames()
+  logistics.clearCarriedStock()
   logistics.spawnPlayerMashes()
   logistics.spawnBuilt()
   logistics.equipEditorFarps()
+  logistics.trimHumvees()
   logistics.syncPads()
   if RH.after then
     local function catchLatePads()
       logistics.discoverEditorPads()
       logistics.equipEditorFarps()
+      logistics.trimHumvees()
       logistics.syncPads()
       logistics.refreshMapLabels()
       logistics.refreshMashLabels()
@@ -2876,6 +2978,7 @@ function logistics.start()
     end
     RH.after(2, catchLatePads)
     RH.after(10, catchLatePads)
+    RH.after(20, function() RH.state.warehouseWipe = nil end)
   end
   logistics.refreshMapLabels()
   logistics.refreshMashLabels()

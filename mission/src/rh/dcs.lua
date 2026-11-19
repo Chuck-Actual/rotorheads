@@ -736,6 +736,8 @@ function dcs.spawnSnapshot(obj)
       data.heliport_modulation = 0
       data.heliport_callsign_id = 1
       data.dynamicSpawn = true
+      -- The player picks the aircraft, the pylons, and hot or cold. Omitting this forces a cold start.
+      data.allowHotStart = true
     end
     local ok = pcall(coalition.addStaticObject, obj.country or country.id.USA, data)
     return ok
@@ -802,8 +804,8 @@ function dcs.spawnFarp(farp)
   if not dcs.objectExists(farp.name) then
     local helipad = SPAWNSTATIC:NewFromType("FARP", "Heliports", country.id.USA)
     helipad:InitShape("FARPS")
-    -- Dynamic spawn on, hot start off. The warehouse is created empty and then filled from the save.
-    helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, false)
+    -- Dynamic spawn on, and hot start is a choice in that menu. The warehouse is filled from the save.
+    helipad:InitFARP(CALLSIGN.FARP.Berlin, farp.freq or 127.5, radio.modulation.AM, true, true)
     helipad:SpawnFromCoordinate(pad, 0, farp.name) -- heading 0 faces the pad north
   end
   for _, piece in ipairs(RH.config.farp.services or {}) do

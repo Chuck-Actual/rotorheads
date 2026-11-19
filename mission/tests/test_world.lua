@@ -28,6 +28,22 @@ T.test("world restore brings back a dropped Humvee and drops a destroyed editor 
   T.eq(#plan.refresh, 0)
 end)
 
+T.test("a renamed FARP does not restore its old service Humvee", function()
+  T.fresh()
+  RH.state.farps["static1-4"] = { name = "static1-4", label = "FARP MUSTANG", x = 1, y = 2, editor = true }
+  local plan = RH.world.plan({
+    baseline = {},
+    objects = {
+      { name = "FARP MUSTANG Humvee", kind = "vehicle", x = 3, y = 4 },
+      { name = "RH_TPL_BLUE_HMMWV_TOW#001", kind = "vehicle", x = 50, y = 80 },
+    },
+  }, {})
+  T.eq(#plan.spawn, 1)
+  T.eq(plan.spawn[1].name, "RH_TPL_BLUE_HMMWV_TOW#001")
+  T.ok(RH.world.farpOwned("FARP MUSTANG Humvee"))
+  T.ok(RH.world.farpOwned("static1-4 Tent"))
+end)
+
 T.test("a moved Humvee is respawned at the saved point", function()
   T.fresh()
   local saved = {
