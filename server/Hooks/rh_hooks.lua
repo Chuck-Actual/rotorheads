@@ -139,10 +139,14 @@ function RHHook.newerSlot(source, dir)
 end
 
 local function loadPacker()
-  if RHHook.packer then return RHHook.packer end
   local home = os.getenv("USERPROFILE") or ""
   local bases = { withSlash(lfs.writedir()) .. "Scripts\\Hooks\\" }
   if home ~= "" then bases[#bases + 1] = home .. "\\Saved Games\\DCS\\Scripts\\Hooks\\" end
+  -- The installer can replace rh_miz.lua and inflate.lua while DCS runs. A changed file is loaded again.
+  local stamp = tostring(modified(bases[1] .. "inflate.lua")) .. ":" .. tostring(modified(bases[1] .. "rh_miz.lua"))
+  if RHHook.packer and RHHook.packerStamp == stamp then return RHHook.packer end
+  RHHook.packer = nil
+  RHHook.packerStamp = stamp
   local errors = {}
   for _, base in ipairs(bases) do
     local inflatePath = base .. "inflate.lua"
@@ -462,7 +466,7 @@ function RHHook.writeStatus(line)
   pcall(writeText, path, text .. "\r\n")
 end
 
-RHHook.version = "2026-11-18c"
+RHHook.version = "2026-11-18d"
 RHHook.loadedAt = os.date("%Y-%m-%d %H:%M:%S")
 DCS.setUserCallbacks(RHHook)
 RHHook.writeStatus()
