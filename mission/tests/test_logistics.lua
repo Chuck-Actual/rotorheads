@@ -779,3 +779,43 @@ T.test("an existing FARP label stays up and the crate count is rewritten on it",
   RH.dcs = saved
   trigger, land, world = nil, nil, nil
 end)
+
+T.test("a save copy retires a built FARP whose pad was deleted in the editor", function()
+  local w = T.fresh()
+  RH.world.hostingSaveCopy = true
+  RH.state.farps["FARP Mustang"] = { name = "FARP Mustang", label = "FARP Mustang", x = 0, y = 0, built = true, crates = 3 }
+  RH.state.farps["FARP Bronco"] = { name = "FARP Bronco", label = "FARP Bronco", x = 0, y = 0, built = true, crates = 3 }
+  RH.state.farps["FARP Pinto"] = { name = "FARP Pinto", label = "FARP Pinto", x = 0, y = 0, pending = true, crates = 0 }
+  RH.state.padStock = { ["FARP Mustang"] = { fuelKg = 800, missiles = {}, granted = true } }
+  w.statics["FARP Bronco"] = { alive = true, typeName = "FARP", side = "blue", point = { x = 5000, y = 6000 } }
+  local destroyed = {}
+  w.dcs.objectExists = function(name) return w.statics[name] ~= nil end
+  w.dcs.destroyNamed = function(name) destroyed[name] = true end
+  local removed = RH.logistics.dropDeletedFarps()
+  T.eq(#removed, 1)
+  T.eq(removed[1], "FARP Mustang")
+  T.eq(RH.state.farps["FARP Mustang"], nil, "the name goes back to the bank")
+  T.eq(RH.state.padStock["FARP Mustang"], nil)
+  T.eq(destroyed["FARP Mustang Tent"], true, "its tent goes too, so it is not found again as an editor FARP")
+  T.eq(RH.state.farps["FARP Bronco"].x, 5000, "a pad moved in the editor moves its load zone")
+  T.ok(RH.state.farps["FARP Pinto"], "a marked FARP with no pad yet still spawns")
+end)
+
+T.test("RH Manual.miz never retires a FARP for a missing pad", function()
+  local w = T.fresh()
+  RH.world.hostingSaveCopy = false
+  RH.state.farps["FARP Mustang"] = { name = "FARP Mustang", label = "FARP Mustang", x = 0, y = 0, built = true, crates = 3 }
+  w.dcs.objectExists = function() return false end
+  T.eq(#RH.logistics.dropDeletedFarps(), 0)
+  T.ok(RH.state.farps["FARP Mustang"])
+end)
+
+T.test("a built FARP's tent left behind in the editor is not a new FARP", function()
+  local w = T.fresh()
+  RH.state.farps["FARP Bronco"] = { name = "FARP Bronco", label = "FARP Bronco", x = 0, y = 0, built = true, crates = 3 }
+  w.statics["FARP Bronco Tent"] = { alive = true, typeName = "FARP Tent", side = "blue", point = { x = 9000, y = 9000 } }
+  RH.logistics.discoverEditorPads()
+  local count = 0
+  for _ in pairs(RH.state.farps) do count = count + 1 end
+  T.eq(count, 1)
+end)

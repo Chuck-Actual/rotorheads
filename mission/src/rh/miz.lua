@@ -85,13 +85,38 @@ do
   end
 end
 
-function miz.crc32(s)
-  local crc = 0xFFFFFFFF
-  for i = 1, #s do
-    local idx = bxor(crc % 256, s:byte(i))
-    crc = bxor(crcTable[idx], math.floor(crc / 256))
+-- Lua 5.1 has no bit operators. The checksum runs a byte at a time through an 8-bit xor table,
+-- so a 400 KB mission takes a fraction of a second instead of stalling the host.
+local xor8, crcBytes
+local function crcTables()
+  if xor8 then return end
+  xor8 = {}
+  for a = 0, 255 do
+    for b = 0, 255 do xor8[a * 256 + b] = bxor(a, b) end
   end
-  return bxor(crc, 0xFFFFFFFF)
+  crcBytes = { {}, {}, {}, {} }
+  for n = 0, 255 do
+    local c = crcTable[n]
+    crcBytes[1][n] = c % 256
+    crcBytes[2][n] = math.floor(c / 256) % 256
+    crcBytes[3][n] = math.floor(c / 65536) % 256
+    crcBytes[4][n] = math.floor(c / 16777216) % 256
+  end
+end
+
+function miz.crc32(s)
+  crcTables()
+  local x, c0, c1, c2, c3 = xor8, crcBytes[1], crcBytes[2], crcBytes[3], crcBytes[4]
+  local r0, r1, r2, r3 = 255, 255, 255, 255
+  local byte = string.byte
+  for i = 1, #s do
+    local idx = x[r0 * 256 + byte(s, i)]
+    r0 = x[c0[idx] * 256 + r1]
+    r1 = x[c1[idx] * 256 + r2]
+    r2 = x[c2[idx] * 256 + r3]
+    r3 = c3[idx]
+  end
+  return (255 - r0) + (255 - r1) * 256 + (255 - r2) * 65536 + (255 - r3) * 16777216
 end
 
 local function inflateRaw(data)
@@ -198,7 +223,8 @@ function miz.entryText(entry)
   return nil, "unsupported zip method " .. tostring(entry.method) .. " for " .. entry.name
 end
 
--- Lua-literal serializer. Same shape as RH.util.serialize, kept here so the hook has no other dependency.
+-- Lua-literal serializer. Every numeric key is written as [n], the way the Mission Editor saves,
+-- so a table with gaps (warehouse ids, airport ids) reads back with the same keys.
 local function serialize(value, indent)
   indent = indent or ""
   local t = type(value)
@@ -213,17 +239,17 @@ local function serialize(value, indent)
   elseif t == "table" then
     local nextIndent = indent .. "  "
     local parts = {}
-    local n = #value
-    for i = 1, n do parts[#parts + 1] = nextIndent .. serialize(value[i], nextIndent) end
     local keys = {}
     for k in pairs(value) do keys[#keys + 1] = k end
-    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+    table.sort(keys, function(a, b)
+      local na, nb = type(a) == "number", type(b) == "number"
+      if na and nb then return a < b end
+      if na ~= nb then return na end
+      return tostring(a) < tostring(b)
+    end)
     for _, k in ipairs(keys) do
-      local isArray = type(k) == "number" and k >= 1 and k <= n and k == math.floor(k)
-      if not isArray then
-        local key = (type(k) == "string" and k:match("^[%a_][%w_]*$")) and k or ("[" .. serialize(k) .. "]")
-        parts[#parts + 1] = nextIndent .. key .. " = " .. serialize(value[k], nextIndent)
-      end
+      local key = (type(k) == "string" and k:match("^[%a_][%w_]*$")) and k or ("[" .. serialize(k) .. "]")
+      parts[#parts + 1] = nextIndent .. key .. " = " .. serialize(value[k], nextIndent)
     end
     if #parts == 0 then return "{}" end
     return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
@@ -231,8 +257,8 @@ local function serialize(value, indent)
   return "nil"
 end
 
-function miz.loadMission(text)
-  if type(text) ~= "string" then return nil, "mission text missing" end
+function miz.loadTable(text, varName)
+  if type(text) ~= "string" then return nil, varName .. " text missing" end
   if text:byte(1) == 239 and text:byte(2) == 187 and text:byte(3) == 191 then text = text:sub(4) end
   local fn, err = loadstring(text)
   if not fn then return nil, err end
@@ -240,8 +266,12 @@ function miz.loadMission(text)
   if setfenv then setfenv(fn, env) end
   local ok, err2 = pcall(fn)
   if not ok then return nil, err2 end
-  if type(env.mission) ~= "table" then return nil, "mission table not found" end
-  return env.mission
+  if type(env[varName]) ~= "table" then return nil, varName .. " table not found" end
+  return env[varName]
+end
+
+function miz.loadMission(text)
+  return miz.loadTable(text, "mission")
 end
 
 local function coalitionName(name)
@@ -301,11 +331,19 @@ local function maxId(mission)
   return max
 end
 
-local function denseGroups(groups, drop)
+local function denseGroups(groups, drop, droppedIds)
   local kept = {}
   for _, group in pairs(groups or {}) do
     local name = groupLabel(group)
-    if type(group) == "table" and not (name and drop[name]) then kept[#kept + 1] = group end
+    if type(group) == "table" then
+      if not (name and drop[name]) then
+        kept[#kept + 1] = group
+      elseif droppedIds and type(group.units) == "table" then
+        for _, unit in pairs(group.units) do
+          if type(unit) == "table" and type(unit.unitId) == "number" then droppedIds[#droppedIds + 1] = unit.unitId end
+        end
+      end
+    end
   end
   table.sort(kept, function(a, b) return tostring(groupLabel(a)) < tostring(groupLabel(b)) end)
   return kept
@@ -363,7 +401,7 @@ local function staticGroup(obj, ids)
   if obj.shape then unit.shape_name = obj.shape end
   if obj.farp then
     unit.category = "Heliports"
-    unit.heliport_frequency = tostring(obj.freq or "127.5")
+    unit.heliport_frequency = tonumber(obj.freq) or 127.5
     unit.heliport_modulation = 0
     unit.heliport_callsign_id = 1
     unit.dynamicSpawn = true
@@ -405,22 +443,38 @@ local function updateGroup(group, obj)
   if obj.x then group.x = obj.x end
   if obj.y then group.y = obj.y end
   if obj.heading then group.heading = obj.heading end
+  if type(group.units) ~= "table" then return end
+  if obj.kind == "static" then
+    for _, unit in pairs(group.units) do
+      if type(unit) == "table" then
+        if obj.x then unit.x = obj.x end
+        if obj.y then unit.y = obj.y end
+        if obj.heading then unit.heading = obj.heading end
+      end
+    end
+    return
+  end
   local byName = {}
   for _, unit in ipairs(obj.units or {}) do
     if unit.name then byName[unit.name] = unit end
   end
-  if type(group.units) ~= "table" then return end
+  local list = {}
   for _, unit in pairs(group.units) do
-    if type(unit) == "table" then
-      local src = byName[unit.name]
-      if not src and #(obj.units or {}) == 1 then src = obj.units[1] end
-      if src then
-        if src.x then unit.x = src.x end
-        if src.y then unit.y = src.y end
-        if src.heading then unit.heading = src.heading end
-      end
+    if type(unit) == "table" then list[#list + 1] = unit end
+  end
+  local kept = {}
+  for _, unit in ipairs(list) do
+    local src = byName[unit.name]
+    if not src and #list == 1 and #(obj.units or {}) == 1 then src = obj.units[1] end
+    if src then
+      if src.x then unit.x = src.x end
+      if src.y then unit.y = src.y end
+      if src.heading then unit.heading = src.heading end
+      kept[#kept + 1] = unit
     end
   end
+  -- A unit killed inside a living group stays out. A save with no matching names leaves the group alone.
+  if #kept > 0 then group.units = kept end
 end
 
 local function findGroup(mission, name)
@@ -439,69 +493,257 @@ local function findGroup(mission, name)
   return found
 end
 
+local function addGroup(mission, obj, ids)
+  local side = coalitionName(obj.coalition)
+  local country = ensureCountry(mission, side, obj.country or 2)
+  local bucket = bucketName(obj.kind)
+  country[bucket] = country[bucket] or { group = {} }
+  if type(country[bucket].group) ~= "table" then country[bucket].group = {} end
+  local entry = obj.kind == "static" and staticGroup(obj, ids) or vehicleGroup(obj, ids)
+  local groups = country[bucket].group
+  groups[#groups + 1] = entry
+  return entry
+end
+
+-- Bearing 0 is north (+x), 90 is east (+y), the same as COORDINATE:Translate in the running mission.
+local function offset(point, dist, bearingDeg)
+  local rad = math.rad(bearingDeg or 0)
+  return point.x + math.cos(rad) * (dist or 0), point.y + math.sin(rad) * (dist or 0)
+end
+
+miz.SAVE_MARKER = "RH_SAVE_COPY"
+
+-- The running campaign checks for this zone. Its presence means the file is a save, so the units in it are the war.
+local function ensureMarker(mission, at, savedAt)
+  mission.triggers = mission.triggers or {}
+  mission.triggers.zones = mission.triggers.zones or {}
+  local zones = mission.triggers.zones
+  local properties = { { key = "savedAt", value = tostring(savedAt or 0) } }
+  local maxZone = 0
+  for _, zone in pairs(zones) do
+    if type(zone) == "table" then
+      if zone.name == miz.SAVE_MARKER then
+        zone.properties = properties
+        return
+      end
+      if type(zone.zoneId) == "number" and zone.zoneId > maxZone then maxZone = zone.zoneId end
+    end
+  end
+  local list = {}
+  for _, zone in pairs(zones) do
+    if type(zone) == "table" then list[#list + 1] = zone end
+  end
+  list[#list + 1] = {
+    name = miz.SAVE_MARKER,
+    x = at and at.x or 0,
+    y = at and at.y or 0,
+    radius = 50,
+    zoneId = maxZone + 1,
+    hidden = true,
+    type = 0,
+    color = { 1, 1, 1, 0.15 },
+    properties = properties,
+  }
+  mission.triggers.zones = list
+end
+
+local DEFAULT_HELICOPTERS = {
+  "Mi-8MTV2", "Mi-8MT", "Mi-24P", "UH-1H", "UH-60L", "CH-47Fbl1",
+  "SA342M", "SA342L", "SA342Mistral", "SA342Minigun", "OH58D", "OH-6A",
+  "AH-64D_BLK_II", "Ka-50", "Ka-50_3",
+}
+
+-- The same entry the Mission Editor writes for a pad with Dynamic Spawn on. Fuel and air-to-ground
+-- missiles are limited; the running campaign fills guns, rockets, and air-to-air from its own shelf list.
+function miz.warehouseEntry(pad, helicopters)
+  local limited = not pad.lc
+  local heli = {}
+  if limited then
+    for _, name in ipairs(helicopters or DEFAULT_HELICOPTERS) do
+      heli[name] = { initialAmount = pad.airframes or 999, unlimited = false }
+    end
+  end
+  local full = limited and 0 or 100
+  return {
+    allowHotStart = true,
+    dynamicSpawn = true,
+    dynamicCargo = true,
+    unlimitedMunitions = not limited,
+    unlimitedAircrafts = not limited,
+    unlimitedFuel = not limited,
+    coalition = pad.coalition or "blue",
+    jet_fuel = { InitFuel = limited and (pad.fuelKg or 0) / 1000 or 100 },
+    gasoline = { InitFuel = full },
+    diesel = { InitFuel = full },
+    methanol_mixture = { InitFuel = full },
+    aircrafts = limited and { helicopters = heli, planes = {} } or {},
+    weapons = {},
+    OperatingLevel_Air = 10,
+    OperatingLevel_Eqp = 10,
+    OperatingLevel_Fuel = 10,
+    periodicity = 30,
+    size = 100,
+    speed = 16.666666,
+    suppliers = {},
+  }
+end
+
+local function padUnit(group)
+  local units = type(group) == "table" and group.units
+  local unit = units and (units[1] or units["1"])
+  if type(unit) == "table" and unit.category == "Heliports" then return unit end
+  return nil
+end
+
+-- Returns what the warehouses file needs: unit ids that left the mission and pads that joined it.
 function miz.patch(mission, world)
-  -- Runtime and FARP objects are rewritten from the save. Editor-placed groups stay, and
-  -- only their position is moved, so routes and loadouts are left alone. Dead editor groups
-  -- are removed so a destroyed unit does not come back.
+  -- Everything the campaign has ever saved and is no longer alive leaves the file, so a
+  -- destroyed unit does not come back. Living groups already in the file are moved in place,
+  -- which keeps their ids, routes, loadouts, and warehouse settings.
+  local result = { droppedIds = {}, newPads = {} }
   local alive = {}
   for _, obj in ipairs(world.objects or {}) do
     if type(obj.name) == "string" then alive[obj.name] = obj end
   end
   local drop = {}
-  for _, obj in ipairs(world.objects or {}) do
-    if obj.origin ~= "baseline" then drop[obj.name] = true end
-  end
   for name in pairs(world.baseline or {}) do
+    if not alive[name] then drop[name] = true end
+  end
+  for name in pairs(world.seen or {}) do
     if not alive[name] then drop[name] = true end
   end
   walkCountries(mission, function(_, country)
     for _, bucket in ipairs({ "vehicle", "ship", "static" }) do
       if country[bucket] and type(country[bucket].group) == "table" then
-        country[bucket].group = denseGroups(country[bucket].group, drop)
+        country[bucket].group = denseGroups(country[bucket].group, drop, result.droppedIds)
       end
     end
   end)
-  for _, obj in ipairs(world.objects or {}) do
-    if obj.origin == "baseline" then
-      local group = findGroup(mission, obj.name)
-      if group then updateGroup(group, obj) end
-    end
+
+  local farpByName = {}
+  for _, rec in ipairs(world.farps or {}) do
+    if type(rec.name) == "string" then farpByName[rec.name] = rec end
   end
+  local function notePad(entry, name, coalition)
+    local unit = padUnit(entry)
+    if not unit then return end
+    local rec = farpByName[name] or {}
+    result.newPads[#result.newPads + 1] = {
+      unitId = unit.unitId,
+      name = name,
+      lc = rec.lc == true,
+      coalition = coalitionName(coalition) == "red" and "red" or "blue",
+      fuelKg = (world.pads or {})[name] or rec.fuelKg or 0,
+    }
+  end
+
   local ids = { n = maxId(mission) }
   for _, obj in ipairs(world.objects or {}) do
-    local missing = obj.origin ~= "baseline" or not findGroup(mission, obj.name)
-    if missing and type(obj.name) == "string" then
-      local side = coalitionName(obj.coalition)
-      local country = ensureCountry(mission, side, obj.country or 2)
-      local bucket = bucketName(obj.kind)
-      country[bucket] = country[bucket] or { group = {} }
-      if type(country[bucket].group) ~= "table" then country[bucket].group = {} end
-      local entry = obj.kind == "static" and staticGroup(obj, ids) or vehicleGroup(obj, ids)
-      local groups = country[bucket].group
-      groups[#groups + 1] = entry
+    if type(obj.name) == "string" then
+      local group = findGroup(mission, obj.name)
+      if group then
+        updateGroup(group, obj)
+      else
+        local entry = addGroup(mission, obj, ids)
+        if obj.farp then notePad(entry, obj.name, obj.coalition) end
+      end
     end
   end
-  return mission
+
+  -- A FARP marked this session has no pad yet. Writing it here makes it a pad DCS loads with the mission.
+  for _, rec in ipairs(world.farps or {}) do
+    if type(rec.name) == "string" and not rec.editor and rec.x and rec.y and not findGroup(mission, rec.name) then
+      local pad = {
+        name = rec.name, kind = "static", type = "FARP", category = "Heliports", shape = "FARPS", farp = true,
+        freq = rec.freq, x = rec.x, y = rec.y, heading = 0, coalition = "blue", country = rec.country or 2,
+      }
+      notePad(addGroup(mission, pad, ids), rec.name, "blue")
+      for _, piece in ipairs(world.farpServices or {}) do
+        local pieceName = rec.name .. " " .. tostring(piece.label)
+        if not findGroup(mission, pieceName) then
+          local px, py = offset(rec, piece.dist or 40, piece.bearing or 0)
+          local heading = math.rad(piece.heading or 0)
+          if piece.kind == "vehicle" then
+            addGroup(mission, {
+              name = pieceName, kind = "vehicle", coalition = "blue", country = rec.country or 2, x = px, y = py, heading = heading,
+              units = { { name = pieceName, type = piece.typeName or "Hummer", x = px, y = py, heading = heading } },
+            }, ids)
+          else
+            addGroup(mission, {
+              name = pieceName, kind = "static", coalition = "blue", country = rec.country or 2, type = piece.typeName,
+              shape = piece.shape, category = piece.category or "Fortifications", x = px, y = py, heading = heading,
+            }, ids)
+          end
+        end
+      end
+    end
+  end
+
+  -- Pads already in the file keep their warehouse. Their saved jet fuel is shown in the editor.
+  result.padFuel = {}
+  for name, fuelKg in pairs(world.pads or {}) do
+    local unit = padUnit(findGroup(mission, name))
+    if unit and type(unit.unitId) == "number" and type(fuelKg) == "number" then result.padFuel[unit.unitId] = fuelKg end
+  end
+
+  local first = (world.farps or {})[1]
+  ensureMarker(mission, first and { x = first.x, y = first.y } or nil, world.savedAt)
+  return mission, result
+end
+
+function miz.patchWarehouses(warehouses, result, world)
+  warehouses = warehouses or {}
+  warehouses.warehouses = warehouses.warehouses or {}
+  warehouses.airports = warehouses.airports or {}
+  local list = warehouses.warehouses
+  for _, id in ipairs(result.droppedIds or {}) do list[id] = nil end
+  for _, pad in ipairs(result.newPads or {}) do
+    if type(pad.unitId) == "number" then
+      pad.airframes = world and world.airframes
+      list[pad.unitId] = miz.warehouseEntry(pad, world and world.helicopters)
+    end
+  end
+  for id, fuelKg in pairs(result.padFuel or {}) do
+    local entry = list[id]
+    if type(entry) == "table" and entry.unlimitedFuel == false then
+      entry.jet_fuel = entry.jet_fuel or {}
+      entry.jet_fuel.InitFuel = fuelKg / 1000
+    end
+  end
+  return warehouses
 end
 
 function miz.exportBytes(mizBytes, world)
   local entries, err = readZip(mizBytes)
   if not entries then return nil, err end
-  local missionText, missionErr
+  local missionText, missionErr, warehouseText, warehouseErr
   local out = {}
   for _, entry in ipairs(entries) do
     if entry.name == "mission" then
       missionText, missionErr = miz.entryText(entry)
-    else
+    elseif entry.name == "warehouses" then
+      warehouseText, warehouseErr = miz.entryText(entry)
+      if not warehouseText then return nil, warehouseErr end
+    elseif entry.name:sub(1, 12) ~= "persistence/" then
+      -- Esc, Save Mission leaves a hidden unit copy under persistence/. Loading it put deleted vehicles back.
       out[#out + 1] = entry
     end
   end
   if not missionText then return nil, missionErr or "mission entry not found" end
   local mission, loadErr = miz.loadMission(missionText)
   if not mission then return nil, loadErr end
-  miz.patch(mission, world)
-  local encoded = "mission = " .. serialize(mission) .. "\n"
-  table.insert(out, 1, storedRecord("mission", encoded))
+  local _, result = miz.patch(mission, world)
+  local warehouses
+  if warehouseText then
+    local loaded, whErr = miz.loadTable(warehouseText, "warehouses")
+    if not loaded then return nil, whErr end
+    warehouses = loaded
+  end
+  if warehouses or #result.newPads > 0 then
+    warehouses = miz.patchWarehouses(warehouses, result, world)
+    table.insert(out, 1, storedRecord("warehouses", "warehouses = " .. serialize(warehouses) .. "\n"))
+  end
+  table.insert(out, 1, storedRecord("mission", "mission = " .. serialize(mission) .. "\n"))
   return writeZip(out)
 end
 

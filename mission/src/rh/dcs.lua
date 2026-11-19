@@ -171,6 +171,18 @@ function dcs.zonesWithPrefix(prefix)
   return out
 end
 
+function dcs.zoneProperty(zoneName, key)
+  for _, z in ipairs(env.mission.triggers.zones or {}) do
+    if z.name == zoneName then
+      for _, prop in pairs(z.properties or {}) do
+        if type(prop) == "table" and prop.key == key then return prop.value end
+      end
+      return nil
+    end
+  end
+  return nil
+end
+
 function dcs.zoneExists(name)
   return trigger.misc.getZone(name) ~= nil or Group.getByName(name) ~= nil
 end

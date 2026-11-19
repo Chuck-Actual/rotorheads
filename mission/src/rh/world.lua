@@ -2,8 +2,8 @@ RH = RH or {}
 
 local util = RH.util
 
--- Snapshot of every ground group, ship, and static. This is what comes back on the next
--- mission start, and what the server hook writes into RH_Editor.miz for the Mission Editor.
+-- Snapshot of every ground group, ship, and static. The server hook writes it into
+-- RH Campaign A.miz or B.miz, the file the next launch hosts and the Mission Editor opens.
 local world = {}
 RH.world = world
 
@@ -94,6 +94,55 @@ function world.plan(saved, alive)
   return { spawn = spawn, destroy = destroy, adopt = adopt, refresh = refresh }
 end
 
+-- What the hook needs to write every FARP into the mission file as a real pad with its own warehouse.
+function world.describeFarps(state)
+  local farps = {}
+  for _, name in ipairs(util.keys(RH.state.farps or {})) do
+    local farp = RH.state.farps[name]
+    if type(farp) == "table" and (farp.pending or farp.built or farp.editor) and farp.x and farp.y then
+      farps[#farps + 1] = {
+        name = name, x = farp.x, y = farp.y, lc = farp.lc == true, editor = farp.editor == true,
+        pending = farp.pending == true, freq = farp.freq,
+      }
+    end
+  end
+  state.farps = farps
+  local pads = {}
+  for name, stock in pairs(RH.state.padStock or {}) do
+    if type(stock) == "table" and type(stock.fuelKg) == "number" and stock.fuelKg >= 0 and stock.fuelKg < 1000000 then
+      pads[name] = stock.fuelKg
+    end
+  end
+  state.pads = pads
+  local fcfg = RH.config.farp or {}
+  state.farpServices = fcfg.services
+  state.airframes = fcfg.airframes
+  local helicopters = {}
+  for typeName, info in pairs(RH.config.airframes or {}) do
+    if type(info) == "table" and not info.fixedWing then helicopters[#helicopters + 1] = typeName end
+  end
+  table.sort(helicopters)
+  state.helicopters = #helicopters > 0 and helicopters or nil
+end
+
+-- A mission the hook wrote carries this zone. In that file the units are already the war.
+function world.isSaveCopy()
+  if not RH.dcs.zonesWithPrefix then return false end
+  local ok, zones = pcall(RH.dcs.zonesWithPrefix, "RH_SAVE_COPY")
+  return ok and type(zones) == "table" and #zones > 0
+end
+
+-- The hook stamps the save time on the marker. Each export is at most 30 seconds behind the save.
+world.STALE_AFTER = 300
+
+function world.saveCopyIsStale(saved)
+  if not RH.dcs.zoneProperty or type(saved) ~= "table" or type(saved.savedAt) ~= "number" then return false end
+  local ok, stamp = pcall(RH.dcs.zoneProperty, "RH_SAVE_COPY", "savedAt")
+  stamp = ok and tonumber(stamp) or nil
+  if not stamp or stamp <= 0 then return false end
+  return saved.savedAt - stamp > world.STALE_AFTER
+end
+
 function world.capture()
   if not RH.dcs.snapshotGround then return false end
   local roster = RH.dcs.snapshotGround() or {}
@@ -119,6 +168,9 @@ function world.capture()
   end
   table.sort(objects, function(a, b) return tostring(a.name) < tostring(b.name) end)
   state.objects = objects
+  state.seen = state.seen or {}
+  for _, obj in ipairs(objects) do state.seen[obj.name] = true end
+  world.describeFarps(state)
   state.savedAt = RH.dcs.wallclock()
   RH.state.world = state
   local path = RH.dcs.savePath and RH.dcs.savePath("world.lua")
@@ -145,69 +197,6 @@ function world.payloadSlice(index, size)
   return text:sub(from, from + size - 1)
 end
 
-function world.savedRoot()
-  if not RH.dcs.filesEnabled or not RH.dcs.filesEnabled() then return nil end
-  if not lfs or not lfs.writedir then return nil end
-  local base = lfs.writedir()
-  if type(base) ~= "string" or base == "" then return nil end
-  if not base:match("[/\\]$") then base = base .. "\\" end
-  return base
-end
-
-function world.fileExists(path)
-  if type(path) ~= "string" or path == "" or not io then return false end
-  local f = io.open(path, "rb")
-  if not f then return false end
-  f:close()
-  return true
-end
-
--- Prefer the mission the hook saw, then the configured test mission. Never read the editor copy back in.
-function world.pickSource(root, hint, exists)
-  exists = exists or world.fileExists
-  local function accept(path)
-    if type(path) ~= "string" then return nil end
-    path = path:gsub("^%s+", ""):gsub("%s+$", "")
-    if path == "" or path:lower():match("rh_editor%.miz$") then return nil end
-    if exists(path) then return path end
-    return nil
-  end
-  local chosen = accept(hint)
-  if chosen then return chosen end
-  return accept(root .. (RH.config.editorSource or "Missions\\RH Test.miz"))
-end
-
-function world.writeNote(text)
-  local root = world.savedRoot()
-  if not root or not RH.dcs.writeFile then return end
-  RH.dcs.writeFile(root .. "Missions\\Rotorheads\\last_export.txt", text .. "\r\n")
-  util.log("editor: %s", (text:gsub("\r\n", " | ")))
-end
-
--- Builds Saved Games\DCS\Missions\RH_Editor.miz from the running mission plus the snapshot.
--- This runs in the mission script, which can already write files. The server hook cannot see the miz.
-function world.exportEditor()
-  local root = world.savedRoot()
-  if not root then return end
-  if not RH.miz or not RH.miz.exportFile then
-    world.writeNote("Editor mission was not built: the mission packer is not loaded.")
-    return
-  end
-  local hint = RH.dcs.readFile and RH.dcs.readFile(root .. "rotorheads\\active_mission.txt") or nil
-  local src = world.pickSource(root, hint)
-  local dest = root .. "Missions\\RH_Editor.miz"
-  if not src then
-    world.writeNote("Editor mission was not built. Put the mission at Saved Games\\DCS\\Missions\\RH Test.miz, or launch it so the hook can record the path.")
-    return
-  end
-  local ok, err = RH.miz.exportFile(src, root .. "rotorheads\\world.lua", dest)
-  if ok then
-    world.writeNote("Wrote " .. dest .. "\r\nFrom " .. src .. "\r\nOpen RH_Editor.miz in the Mission Editor. It updates about every 30 seconds while the mission is running.")
-  else
-    world.writeNote("Editor mission failed.\r\n" .. tostring(err) .. "\r\nSource " .. src)
-  end
-end
-
 -- DCS's own Esc > Save Mission includes script-spawned units. Attach the campaign so that file can resume the war.
 function world.installOfficialSave()
   local dcsWorld = _G.world
@@ -232,10 +221,28 @@ function world.readOfficialSave()
   return true
 end
 
+-- In a save copy the editor is allowed to add, move, and delete units. What the file holds is kept.
+function world.planSaveCopy(saved, alive)
+  local plan = world.plan(saved, alive)
+  return { spawn = {}, destroy = {}, adopt = plan.adopt, refresh = {} }
+end
+
 function world.restore()
   local saved = RH.state.world
   if not saved or not saved.baselineReady or not RH.dcs.groundRoster then return { spawn = {}, destroy = {}, adopt = {}, refresh = {} } end
-  local plan = world.plan(saved, RH.dcs.groundRoster())
+  world.hostingSaveCopy = world.isSaveCopy()
+  if world.hostingSaveCopy and world.saveCopyIsStale(saved) then
+    world.hostingSaveCopy = false
+    util.log("world restore: the hosted save copy is older than the campaign save, so missing units are put back")
+    RH.dcs.message("all", "ROTORHEADS: this campaign file is older than the save. Host the newer RH Campaign file. Missing units were put back from the save.", 60)
+  end
+  local plan
+  if world.hostingSaveCopy then
+    plan = world.planSaveCopy(saved, RH.dcs.groundRoster())
+    util.log("world restore: the hosted mission is a save copy, so its units are used as they are")
+  else
+    plan = world.plan(saved, RH.dcs.groundRoster())
+  end
   for _, name in ipairs(plan.destroy) do
     if RH.dcs.destroyNamed then RH.dcs.destroyNamed(name) end
   end

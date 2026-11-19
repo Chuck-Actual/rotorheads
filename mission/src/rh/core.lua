@@ -86,8 +86,9 @@ function persistence.load()
 end
 
 function persistence.save()
-  if RH.world and RH.world.capture then RH.world.capture() end
+  -- Pad fuel is read first so the world save, and the mission file built from it, carry the latest tank.
   if RH.logistics and RH.logistics.captureStocks then RH.logistics.captureStocks() end
+  if RH.world and RH.world.capture then RH.world.capture() end
   RH.state.savedAt = RH.dcs.wallclock()
   local ok = RH.dcs.writeFile(persistence.path("campaign.lua"), util.serialize(RH.state))
   if RH.ctld and RH.ctld.instance and RH.ctld.instance.__Save then

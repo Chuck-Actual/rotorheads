@@ -68,15 +68,6 @@ T.test("the hook can reassemble the world save from slices", function()
   T.eq(table.concat(parts), RH.world._payload)
 end)
 
-T.test("editor mission is RH Test.miz unless the hook saw another file", function()
-  T.fresh()
-  local files = { ["C:\\DCS\\Missions\\RH Test.miz"] = true }
-  T.eq(RH.world.pickSource("C:\\DCS\\", nil, function(p) return files[p] end), "C:\\DCS\\Missions\\RH Test.miz")
-  files["D:\\Other.miz"] = true
-  T.eq(RH.world.pickSource("C:\\DCS\\", "  D:\\Other.miz\r\n", function(p) return files[p] end), "D:\\Other.miz")
-  T.eq(RH.world.pickSource("C:\\DCS\\", "C:\\DCS\\Missions\\RH_Editor.miz", function(p) return files[p] end), "C:\\DCS\\Missions\\RH Test.miz")
-end)
-
 T.test("world capture records a runtime Humvee and keeps the editor baseline", function()
   local w = T.fresh()
   local roster = {
@@ -100,4 +91,91 @@ T.test("world capture records a runtime Humvee and keeps the editor baseline", f
   T.eq(origins["RH_TPL_BLUE_HMMWV_TOW#001"], "runtime")
   T.eq(origins["Garrison North"], nil)
   T.ok(w.files["save/world.lua"]:find("HMMWV"))
+end)
+
+T.test("world capture lists FARPs, pad fuel, and every name it has saved for the mission file", function()
+  local w = T.fresh()
+  RH.state.farps["FARP Mustang"] = { name = "FARP Mustang", x = 100, y = 200, built = true, label = "FARP Mustang" }
+  RH.state.farps["FARP Bronco"] = { name = "FARP Bronco", x = 300, y = 400, pending = true, label = "FARP Bronco" }
+  RH.state.farps["RH_FARP_Zone"] = { name = "RH_FARP_Zone", x = 1, y = 1, lc = true }
+  RH.state.padStock = { ["FARP Mustang"] = { fuelKg = 1500, missiles = {}, granted = true }, Huge = { fuelKg = 5000000 } }
+  local roster = { { name = "Truck", kind = "vehicle", x = 1, y = 2 } }
+  w.dcs.snapshotGround = function() return roster end
+  RH.world.capture()
+  roster = {}
+  RH.world.capture()
+  local saved = RH.state.world
+  T.eq(saved.seen["Truck"], true, "a dead truck stays known so the export can remove it")
+  local names = {}
+  for _, rec in ipairs(saved.farps) do names[rec.name] = rec end
+  T.ok(names["FARP Mustang"] and names["FARP Bronco"], "built and marked FARPs are listed")
+  T.eq(names["FARP Bronco"].pending, true)
+  T.eq(names["RH_FARP_Zone"], nil, "a zone-only record with no pad is left out")
+  T.eq(saved.pads["FARP Mustang"], 1500)
+  T.eq(saved.pads.Huge, nil, "an unlimited reading is not a delivery")
+  T.eq(#saved.farpServices, 5)
+  T.eq(saved.airframes, 999)
+  local hasC130 = false
+  for _, typeName in ipairs(saved.helicopters) do if typeName == "C-130J-30" then hasC130 = true end end
+  T.eq(hasC130, false, "fixed wing never gets a FARP slot")
+end)
+
+local function hostedSaveCopy(w, stamp)
+  table.insert(w.zones, { name = "RH_SAVE_COPY", point = { x = 0, y = 0 }, radius = 50 })
+  w.dcs.zoneProperty = function(zone, key)
+    if zone == "RH_SAVE_COPY" and key == "savedAt" then return stamp end
+  end
+end
+
+T.test("a save copy keeps the units the editor left in it", function()
+  local w = T.fresh()
+  RH.state.world = {
+    baselineReady = true, savedAt = 5000,
+    baseline = { Shed = true },
+    objects = {
+      { name = "Shed", kind = "static", x = 1, y = 2 },
+      { name = "Deleted Humvee", kind = "vehicle", x = 5, y = 5 },
+      { name = "Moved Tank", kind = "vehicle", x = 0, y = 0 },
+    },
+  }
+  hostedSaveCopy(w, "4990")
+  local spawned, destroyed = {}, {}
+  w.dcs.spawnSnapshot = function(obj) spawned[#spawned + 1] = obj.name end
+  w.dcs.destroyNamed = function(name) destroyed[#destroyed + 1] = name end
+  w.dcs.groundRoster = function()
+    return { { name = "Moved Tank", x = 900, y = 900 }, { name = "Editor Truck", x = 7, y = 7 } }
+  end
+  local plan = RH.world.restore()
+  T.eq(RH.world.hostingSaveCopy, true)
+  T.eq(#spawned, 0, "a vehicle deleted in the editor stays deleted, and a shed the editor removed is not rebuilt")
+  T.eq(#destroyed, 0, "a tank moved in the editor is not dragged back")
+  T.eq(plan.adopt[1], "Editor Truck")
+  T.eq(RH.state.world.baseline["Editor Truck"], true)
+end)
+
+T.test("an old save copy falls back to putting units back from the save", function()
+  local w = T.fresh()
+  RH.state.world = {
+    baselineReady = true, savedAt = 100000, baseline = {},
+    objects = { { name = "Built Humvee", kind = "vehicle", x = 5, y = 5 } },
+  }
+  hostedSaveCopy(w, "1000")
+  local spawned = {}
+  w.dcs.spawnSnapshot = function(obj) spawned[#spawned + 1] = obj.name end
+  w.dcs.groundRoster = function() return {} end
+  RH.world.restore()
+  T.eq(RH.world.hostingSaveCopy, false)
+  T.eq(spawned[1], "Built Humvee")
+  T.ok(w.messages[#w.messages].text:find("older than the save"), "the host is told to use the newer file")
+end)
+
+T.test("RH Manual.miz has no marker, so missing units come back as before", function()
+  local w = T.fresh()
+  RH.state.world = { baselineReady = true, baseline = {}, objects = { { name = "Built Humvee", kind = "vehicle", x = 5, y = 5 } } }
+  local spawned = {}
+  w.dcs.spawnSnapshot = function(obj) spawned[#spawned + 1] = obj.name end
+  w.dcs.groundRoster = function() return {} end
+  RH.world.restore()
+  T.eq(RH.world.hostingSaveCopy, false)
+  T.eq(spawned[1], "Built Humvee")
 end)

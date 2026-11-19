@@ -178,11 +178,22 @@ function logistics.discoverEditorPads()
   end
   table.sort(tents, function(a, b) return (a.name or "") < (b.name or "") end)
   for _, tent in ipairs(tents) do
-    local index = 0
-    for _ in pairs(RH.state.farps) do index = index + 1 end
-    local name = tent.name ~= "" and tent.name or "FARP"
-    registerEditorSite(name, tent, index + 1)
+    if not logistics.pieceOfKnownFarp(tent.name) then
+      local index = 0
+      for _ in pairs(RH.state.farps) do index = index + 1 end
+      local name = tent.name ~= "" and tent.name or "FARP"
+      registerEditorSite(name, tent, index + 1)
+    end
   end
+end
+
+-- "FARP Pinto Tent" belongs to FARP Pinto even after the pad is moved away from it in the editor.
+function logistics.pieceOfKnownFarp(name)
+  if type(name) ~= "string" then return false end
+  for farpName, farp in pairs(RH.state.farps) do
+    if not farp.editor and name ~= farpName and logistics.pieceNames(farpName)[name] then return true end
+  end
+  return false
 end
 
 -- East of the tent, between the tent and the pad. Bearing 90 is east in this map.
@@ -438,7 +449,7 @@ function logistics.buildFarp(point, builtBy)
   RH.dcs.smoke(farp, RH.config.markers.smokeColors.green)
   if RH.persistence and RH.persistence.save then RH.persistence.save() end
   RH.dcs.message("blue", string.format(
-    "%s marked %s and saved it. Restart the mission to build the pad, tent, Humvee, fuel depot, and ammo dump. The Mission Editor copy is RH_Editor.miz, written beside your mission when you leave.",
+    "%s marked %s and saved it. It is written into the next campaign file as a real FARP: pad, tent, Humvee, fuel depot, and ammo dump. It is up after the next restart.",
     builtBy or "A pilot", name), 30)
   RH.dcs.notify("farp_marked", { farp = name, kind = kind })
   return farp
@@ -515,6 +526,38 @@ function logistics.dropStackedFarps()
   end
   if #dropped > 0 and RH.persistence and RH.persistence.save then RH.persistence.save() end
   return dropped
+end
+
+-- In a save copy every built FARP is already a pad in the file. One that is missing was deleted in the editor.
+-- A marked FARP with no pad still spawns, so a crash before the next export does not lose it.
+function logistics.dropDeletedFarps()
+  if not (RH.world and RH.world.hostingSaveCopy) or not RH.dcs.objectExists then return {} end
+  local removed = {}
+  local where = {}
+  for _, static in ipairs(RH.dcs.staticObjects and RH.dcs.staticObjects() or {}) do
+    if static.name then where[static.name] = static end
+  end
+  for name, farp in pairs(RH.state.farps) do
+    if farp.built and not farp.pending and not farp.editor then
+      if not RH.dcs.objectExists(name) then
+        removed[#removed + 1] = name
+      elseif where[name] and where[name].x and where[name].y then
+        -- A pad moved in the editor takes its load zone and map label with it.
+        farp.x, farp.y = where[name].x, where[name].y
+      end
+    end
+  end
+  table.sort(removed)
+  for _, name in ipairs(removed) do
+    RH.state.farps[name] = nil
+    if RH.state.padStock then RH.state.padStock[name] = nil end
+    for pieceName in pairs(logistics.pieceNames(name)) do
+      if pieceName ~= name and RH.dcs.destroyNamed then RH.dcs.destroyNamed(pieceName) end
+    end
+    if RH.dcs.removeDrawing then RH.dcs.removeDrawing("farp-stock-" .. name) end
+    util.log("%s was removed in the Mission Editor, so it is no longer a FARP", name)
+  end
+  return removed
 end
 
 function logistics.spawnBuilt()
@@ -1063,6 +1106,7 @@ end
 
 function logistics.start()
   logistics.discoverPlaced()
+  logistics.dropDeletedFarps()
   logistics.dropStackedFarps()
   logistics.discoverEditorPads()
   logistics.assignFarpNames()

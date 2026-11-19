@@ -8,8 +8,6 @@ RH.config = {
   saveFolder = "rotorheads",
   -- Ground units, statics, FARPs, and warehouses are written this often, and again on exit.
   saveInterval = 30,
-  -- The mission the editor copy is built from, relative to Saved Games\DCS.
-  editorSource = "Missions\\RH Test.miz",
   liveMapInterval = 30,
 
   -- Must match the restart interval in server/Hooks/rh_hooks.lua.

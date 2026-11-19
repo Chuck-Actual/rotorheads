@@ -31,7 +31,7 @@ function chat.handle(playerName, text)
     RH.dcs.message("blue", RH.logistics.mashStatus(from), 15)
   elseif cmd == "-save" then
     RH.persistence.save()
-    RH.dcs.message("all", "Campaign saved. Ground units are in the save. RH_Editor.miz, beside your mission, is the copy the Mission Editor can open.", 12)
+    RH.dcs.message("all", "Campaign saved. The server writes RH Campaign A.miz or B.miz beside your mission. That file is the next launch and the one the Mission Editor opens.", 12)
   end
 end
 

@@ -74,11 +74,60 @@ local function findSource()
     roots[#roots + 1] = home .. "\\Saved Games\\DCS.openbeta\\"
   end
   for _, root in ipairs(roots) do
-    local path = root .. "Missions\\RH Test.miz"
-    tried[#tried + 1] = path
-    if lfs.attributes(path) then return path, tried end
+    for _, name in ipairs({ "RH Manual.miz", "RH Test.miz" }) do
+      local path = root .. "Missions\\" .. name
+      tried[#tried + 1] = path
+      if lfs.attributes(path) then return path, tried end
+    end
   end
   return nil, tried
+end
+
+-- The save is written into one of two mission files. The one being hosted is locked, so each
+-- launch writes the other one, and the next launch hosts that.
+RHHook.slots = { "RH Campaign A.miz", "RH Campaign B.miz" }
+
+local function splitPath(path)
+  local dir, file = tostring(path or ""):match("^(.*)[/\\]([^/\\]+)$")
+  return dir, file
+end
+
+local function slotIndex(path)
+  local _, file = splitPath(path)
+  if not file then return nil end
+  for i, name in ipairs(RHHook.slots) do
+    if file:lower() == name:lower() then return i end
+  end
+  return nil
+end
+
+local function modified(path)
+  local attr = path and lfs.attributes(path)
+  return attr and attr.modification or nil
+end
+
+function RHHook.slotTarget(source)
+  local dir = splitPath(source)
+  if not dir then return nil end
+  local running = slotIndex(source)
+  if running then return dir .. "\\" .. RHHook.slots[3 - running] end
+  -- Hosting RH Manual.miz or another file: overwrite the older slot, so the newer one stays as a backup.
+  local a, b = dir .. "\\" .. RHHook.slots[1], dir .. "\\" .. RHHook.slots[2]
+  local ma, mb = modified(a), modified(b)
+  if ma and mb and mb < ma then return b end
+  if ma and not mb then return b end
+  return a
+end
+
+-- Hosting the older slot by mistake would roll the war back. The newer slot wins.
+function RHHook.newerSlot(source)
+  local running = slotIndex(source)
+  if not running then return nil end
+  local dir = splitPath(source)
+  local other = dir .. "\\" .. RHHook.slots[3 - running]
+  local mine, theirs = modified(source), modified(other)
+  if mine and theirs and theirs > mine then return other end
+  return nil
 end
 
 local function loadPacker()
@@ -216,8 +265,9 @@ local function allowMissionFiles()
   return table.concat(notes, "\r\n")
 end
 
--- Builds RH_Editor.miz beside the running mission. The mission sandbox often cannot write files.
+-- Builds the next campaign file beside the running mission. The mission sandbox often cannot write files.
 local function exportEditor()
+  if RHHook.switching then return end
   local source, tried = findSource()
   -- a_do_script runs in the mission environment, which is where RH exists. A bare return from the hook does not.
   toMission("if RH and RH.persistence and RH.persistence.save then RH.persistence.save() end")
@@ -237,24 +287,25 @@ local function exportEditor()
     return
   end
   if not source then
-    writeNote(nil, "Editor mission was not built.\r\nRH Test.miz was not found.\r\nLooked in " .. table.concat(tried, "\r\n"))
+    writeNote(nil, "Campaign mission was not built.\r\nRH Manual.miz was not found.\r\nLooked in " .. table.concat(tried, "\r\n"))
     return
   end
   local packer, packerErr = loadPacker()
   if not packer then
-    writeNote(source, "Editor mission was not built.\r\n" .. tostring(packerErr))
+    writeNote(source, "Campaign mission was not built.\r\n" .. tostring(packerErr))
     return
   end
-  local dir, filename = source:match("^(.*)[/\\]([^/\\]+)$")
-  -- The hosted file stays locked until the server stops, so the editor copy is a different file.
-  local destName = filename:lower() == "rh_editor.miz" and "RH_Editor_latest.miz" or "RH_Editor.miz"
-  local dest = dir .. "\\" .. destName
+  local dest = RHHook.slotTarget(source)
+  local _, destName = splitPath(dest)
   local ok, err = packer.exportText(source, worldText, dest)
   if ok then
-    writeNote(source, "Wrote " .. dest .. "\r\nFrom " .. source .. "\r\nUnits from " .. tostring(worldPath) .. "\r\nStop the server, then open this file in the Mission Editor. The mission that is running is left as it is.")
+    RHHook.lastExport = dest
+    writeNote(source, "Wrote " .. dest .. "\r\nFrom " .. source .. "\r\nUnits from " .. tostring(worldPath)
+      .. "\r\nHost " .. destName .. " next. It holds every unit and every FARP as a real pad with its warehouse."
+      .. "\r\nTo change the war, stop the server, open " .. destName .. " in the Mission Editor, save it under the same name, and host it.")
     if not RHHook.told then
       RHHook.told = true
-      net.send_chat("Rotorheads saved " .. destName .. ". Stop the server before opening it in the Mission Editor.", true)
+      net.send_chat("Rotorheads saved " .. destName .. ". The next restart hosts it. Stop the server before opening it in the Mission Editor.", true)
     end
   else
     writeNote(source, "Editor mission failed.\r\n" .. tostring(err) .. "\r\nSource " .. source .. "\r\nDestination " .. dest)
@@ -265,10 +316,18 @@ local function exportEditor()
   end
 end
 
+local SHUTDOWN = "if RH and RH.shutdown then RH.shutdown() end"
+
+-- The restart hosts the campaign file that was just written, so built FARPs load as real pads.
 local function restart(reason)
   log("restarting mission: " .. reason)
-  toMission("RH.shutdown()")
-  net.load_mission(DCS.getMissionFilename())
+  toMission(SHUTDOWN)
+  RHHook.lastExport = nil
+  local ok, err = pcall(exportEditor)
+  if not ok then log("editor export error: " .. tostring(err)) end
+  local target = RHHook.lastExport or DCS.getMissionFilename()
+  log("loading " .. tostring(target))
+  net.load_mission(target)
 end
 
 function RHHook.onSimulationStop()
@@ -278,7 +337,7 @@ function RHHook.onSimulationStop()
   end
   if not RHHook.shutdownSent then
     RHHook.shutdownSent = true
-    toMission("RH.shutdown()")
+    toMission(SHUTDOWN)
   end
 end
 
@@ -286,9 +345,31 @@ function RHHook.onSimulationStart()
   RHHook.warned = {}
   RHHook.shutdownSent = false
   RHHook.emptySince = nil
+  RHHook.switching = false
+  RHHook.slotChecked = false
+end
+
+-- Runs on the first frame, before the campaign script loads two seconds in.
+local function checkSlot()
+  RHHook.slotChecked = true
+  local source = findSource()
+  local newer = source and RHHook.newerSlot(source)
+  if newer then
+    RHHook.switching = true
+    log("hosting " .. source .. " but " .. newer .. " is newer, loading that instead")
+    net.load_mission(newer)
+    return true
+  end
+  return false
 end
 
 function RHHook.onSimulationFrame()
+  if not RHHook.slotChecked then
+    local ok, switched = pcall(checkSlot)
+    if not ok then log("slot check error: " .. tostring(switched)) end
+    if ok and switched then return end
+  end
+  if RHHook.switching then return end
   local now = DCS.getRealTime()
   if now - RHHook.lastCheck < 5 then return end
   RHHook.lastCheck = now
@@ -308,7 +389,7 @@ function RHHook.onSimulationFrame()
   end
   if left <= 30 and not RHHook.shutdownSent then
     RHHook.shutdownSent = true
-    toMission("RH.shutdown()")
+    toMission(SHUTDOWN)
   end
   if left <= 0 then
     restart("scheduled")
