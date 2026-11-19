@@ -356,3 +356,87 @@ T.test("the export works in the DCS hook environment, which has no io.type, io.s
   T.ok(names["mission"] and names["warehouses"], "the campaign file opens")
   T.ok(readFile(dir .. "/mission"):find("FARP Pinto", 1, true), "the marked FARP is in it")
 end)
+
+-- The field lists below are what the Mission Editor writes in RH_Manual.miz. A group missing them keeps the editor on its loading screen.
+local EDITOR_FIELDS = {
+  vehicleGroup = { "groupId", "hidden", "name", "route", "start_time", "task", "taskSelected", "tasks", "uncontrollable", "units", "visible", "x", "y" },
+  vehicleUnit = { "coldAtStart", "heading", "name", "playerCanDrive", "skill", "type", "unitId", "x", "y" },
+  vehiclePoint = { "ETA", "ETA_locked", "action", "alt", "alt_type", "formation_template", "speed", "speed_locked", "task", "type", "x", "y" },
+  staticGroup = { "dead", "groupId", "heading", "name", "route", "units", "x", "y" },
+  staticUnit = { "category", "heading", "name", "type", "unitId", "x", "y" },
+  staticPoint = { "action", "alt", "formation_template", "name", "speed", "type", "x", "y" },
+}
+
+local function missing(t, fields)
+  local out = {}
+  for _, f in ipairs(fields) do if t[f] == nil then out[#out + 1] = f end end
+  return table.concat(out, ",")
+end
+
+T.test("every group in the campaign file has the fields the Mission Editor needs to open it", function()
+  local miz = loadMiz()
+  local world = manualWorld()
+  world.objects = {
+    { name = "Built Abrams", kind = "vehicle", coalition = "blue", country = 2, x = 41100, y = 9600, heading = 1,
+      units = { { name = "Built Abrams-1", type = "M-1 Abrams", x = 41100, y = 9600, heading = 1 } } },
+    { name = "Odd Country Truck", kind = "vehicle", coalition = "blue", country = 3, x = 41200, y = 9600,
+      units = { { name = "Odd Country Truck-1", type = "M 818", x = 41200, y = 9600 } } },
+    { name = "CTLD crate 4", kind = "static", coalition = "neutral", country = 80, type = "container_cargo", category = "Fortifications", x = 41300, y = 9600 },
+    { name = "Sandbags", kind = "static", coalition = "blue", country = 2, type = "Sandbox", category = "Fortifications", x = 41400, y = 9600 },
+    { name = "Stolen Name", kind = "vehicle", coalition = "blue", country = 2, x = 41500, y = 9600,
+      units = { { name = "vehicle1-3", type = "Hummer", x = 41500, y = 9600 } } },
+    { name = "Carrier", kind = "ship", coalition = "blue", country = 2, x = 0, y = 0, units = { { name = "Carrier-1", type = "LHA_Tarawa", x = 0, y = 0 } } },
+  }
+  local out, err = miz.exportBytes(readFile("RH_Manual.miz"), world)
+  T.ok(out, err)
+  local dir = unpack(out)
+  local mission = assert(miz.loadMission(readFile(dir .. "/mission")))
+  local groupIds, unitIds, names, countryIds = {}, {}, {}, {}
+  local problems = {}
+  local function problem(text) problems[#problems + 1] = text end
+  for sideName, side in pairs(mission.coalition) do
+    for _, country in pairs(side.country or {}) do
+      if type(country.name) ~= "string" then problem("country " .. tostring(country.id) .. " on " .. sideName .. " has no name") end
+      if countryIds[country.id] then problem("country " .. tostring(country.id) .. " is listed twice") end
+      countryIds[country.id] = true
+      for _, bucket in ipairs({ "vehicle", "static", "ship", "plane", "helicopter" }) do
+        for _, group in pairs(country[bucket] and country[bucket].group or {}) do
+          if groupIds[group.groupId] then problem("duplicate groupId " .. tostring(group.groupId)) end
+          groupIds[group.groupId] = true
+          if names[group.name] then problem("duplicate group name " .. tostring(group.name)) end
+          names[group.name] = true
+          local kind = bucket == "static" and "static" or (bucket == "vehicle" and "vehicle" or nil)
+          if kind then
+            local m = missing(group, EDITOR_FIELDS[kind .. "Group"])
+            if m ~= "" then problem(group.name .. " group lacks " .. m) end
+            local point = group.route and group.route.points and group.route.points[1]
+            if not point then problem(group.name .. " has no route point")
+            else
+              m = missing(point, EDITOR_FIELDS[kind .. "Point"])
+              if m ~= "" then problem(group.name .. " route point lacks " .. m) end
+            end
+          end
+          for _, unit in pairs(group.units or {}) do
+            if unit.name ~= group.name and names[unit.name] then problem("duplicate unit name " .. tostring(unit.name)) end
+            if unit.name ~= group.name then names[unit.name] = true end
+            if unitIds[unit.unitId] then problem("duplicate unitId " .. tostring(unit.unitId)) end
+            unitIds[unit.unitId] = true
+            if kind then
+              local m = missing(unit, EDITOR_FIELDS[kind .. "Unit"])
+              if m ~= "" then problem(tostring(unit.name) .. " lacks " .. m) end
+            end
+          end
+        end
+      end
+    end
+  end
+  T.eq(table.concat(problems, "\n"), "")
+  local groups = staticsNamed(mission)
+  T.ok(groups["Built Abrams"] and groups["Odd Country Truck"] and groups["Sandbags"], "added groups are in the file")
+  T.eq(groups["CTLD crate 4#group"].units[1].category, "Cargos", "a cargo type is written as cargo")
+  T.eq(groups["Carrier"], nil, "a ship that is not in the file is not invented")
+  T.eq(groups["Stolen Name"], nil, "a group whose unit repeats a name already in the file stays out")
+  for _, zone in pairs(mission.triggers.zones) do
+    if zone.name == "RH_SAVE_COPY" then T.eq(zone.heading, 0) end
+  end
+end)

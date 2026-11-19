@@ -354,46 +354,72 @@ local function nextId(state)
   return state.n
 end
 
+-- Groups are written with every field the Mission Editor writes. The editor stops loading on a group that lacks them.
+local function vehicleRoute(x, y)
+  return {
+    spans = {},
+    routeRelativeTOT = true,
+    points = { {
+      alt = 0, alt_type = "BARO", type = "Turning Point", action = "Off Road", formation_template = "",
+      ETA = 0, ETA_locked = true, speed = 0, speed_locked = true, x = x, y = y,
+      task = { id = "ComboTask", params = { tasks = {} } },
+    } },
+  }
+end
+
+local function staticRoute(x, y)
+  return { points = { { alt = 0, type = "", name = "", action = "", speed = 0, formation_template = "", x = x, y = y } } }
+end
+
+local function vehicleUnit(unit, obj, ids)
+  return {
+    name = unit.name or obj.name,
+    type = unit.type or obj.type or "Hummer",
+    x = unit.x or obj.x or 0,
+    y = unit.y or obj.y or 0,
+    heading = unit.heading or obj.heading or 0,
+    skill = unit.skill or "Average",
+    unitId = nextId(ids),
+    playerCanDrive = false,
+    coldAtStart = false,
+  }
+end
+
 local function vehicleGroup(obj, ids)
   local units = {}
-  for i, unit in ipairs(obj.units or {}) do
-    units[i] = {
-      name = unit.name or obj.name,
-      type = unit.type or obj.type or "Hummer",
-      x = unit.x or obj.x or 0,
-      y = unit.y or obj.y or 0,
-      heading = unit.heading or obj.heading or 0,
-      skill = unit.skill or "Average",
-      unitId = nextId(ids),
-      playerCanDrive = false,
-      transportable = { randomTransportable = false },
-    }
-  end
-  if #units == 0 then
-    units[1] = {
-      name = obj.name, type = obj.type or "Hummer", x = obj.x or 0, y = obj.y or 0,
-      heading = obj.heading or 0, skill = "Average", unitId = nextId(ids),
-      playerCanDrive = false, transportable = { randomTransportable = false },
-    }
-  end
+  for i, unit in ipairs(obj.units or {}) do units[i] = vehicleUnit(unit, obj, ids) end
+  if #units == 0 then units[1] = vehicleUnit({}, obj, ids) end
+  local x, y = units[1].x, units[1].y
   return {
     name = obj.name,
     task = "Ground Nothing",
-    x = obj.x or 0,
-    y = obj.y or 0,
-    visible = true,
+    taskSelected = true,
+    tasks = {},
+    x = x,
+    y = y,
+    visible = false,
+    hidden = false,
+    lateActivation = false,
+    uncontrollable = false,
+    start_time = 0,
     groupId = nextId(ids),
-    route = { points = { { x = obj.x or 0, y = obj.y or 0, type = "Off Road", action = "Off Road", speed = 0 } } },
+    route = vehicleRoute(x, y),
     units = units,
   }
 end
 
+local function isCargoType(typeName)
+  local t = string.lower(tostring(typeName or ""))
+  return t:find("cargo", 1, true) ~= nil or t:find("crate", 1, true) ~= nil
+end
+
 local function staticGroup(obj, ids)
+  local x, y = obj.x or 0, obj.y or 0
   local unit = {
     name = obj.name,
     type = obj.type or "FARP Tent",
-    x = obj.x or 0,
-    y = obj.y or 0,
+    x = x,
+    y = y,
     heading = obj.heading or 0,
     category = obj.category or "Fortifications",
     unitId = nextId(ids),
@@ -406,37 +432,54 @@ local function staticGroup(obj, ids)
     unit.heliport_callsign_id = 1
     unit.dynamicSpawn = true
     unit.allowHotStart = true
+  elseif unit.category == "Cargos" or isCargoType(unit.type) then
+    unit.category = "Cargos"
+    unit.mass = tonumber(obj.mass) or 1000
+    unit.canCargo = true
+  else
+    unit.rate = 50
+    unit.tasks = {}
   end
   return {
     name = obj.name,
     heading = obj.heading or 0,
-    x = obj.x or 0,
-    y = obj.y or 0,
+    x = x,
+    y = y,
     dead = false,
     groupId = nextId(ids),
+    route = staticRoute(x, y),
     units = { unit },
   }
 end
 
-local function ensureCountry(mission, side, countryId)
+local function denseCountries(mission, side)
   mission.coalition = mission.coalition or {}
   mission.coalition[side] = mission.coalition[side] or { country = {} }
-  local countries = mission.coalition[side].country
-  if type(countries) ~= "table" then countries = {} mission.coalition[side].country = countries end
+  local block = mission.coalition[side]
   local dense = {}
-  for _, country in pairs(countries) do
+  for _, country in pairs(type(block.country) == "table" and block.country or {}) do
     if type(country) == "table" then dense[#dense + 1] = country end
   end
-  for _, country in ipairs(dense) do
-    if country.id == countryId then
-      mission.coalition[side].country = dense
-      return country
+  block.country = dense
+  return dense
+end
+
+-- A country the editor did not write has no name, and the editor cannot load it. Units go into a
+-- country already in the file: the same id on that side, else that id on another side, else the side's first country.
+local function ensureCountry(mission, side, countryId)
+  for _, country in ipairs(denseCountries(mission, side)) do
+    if country.id == countryId then return country end
+  end
+  for _, other in ipairs({ "blue", "red", "neutrals" }) do
+    for _, country in ipairs(denseCountries(mission, other)) do
+      if country.id == countryId and type(country.name) == "string" then return country end
     end
   end
-  local country = { id = countryId }
-  dense[#dense + 1] = country
-  mission.coalition[side].country = dense
-  return country
+  for _, try in ipairs({ side, "blue", "red" }) do
+    local first = denseCountries(mission, try)[1]
+    if first and type(first.name) == "string" then return first end
+  end
+  return nil
 end
 
 local function updateGroup(group, obj)
@@ -494,8 +537,10 @@ local function findGroup(mission, name)
 end
 
 local function addGroup(mission, obj, ids)
+  if obj.kind == "ship" then return nil end
   local side = coalitionName(obj.coalition)
   local country = ensureCountry(mission, side, obj.country or 2)
+  if not country then return nil end
   local bucket = bucketName(obj.kind)
   country[bucket] = country[bucket] or { group = {} }
   if type(country[bucket].group) ~= "table" then country[bucket].group = {} end
@@ -538,6 +583,7 @@ local function ensureMarker(mission, at, savedAt)
     x = at and at.x or 0,
     y = at and at.y or 0,
     radius = 50,
+    heading = 0,
     zoneId = maxZone + 1,
     hidden = true,
     type = 0,
@@ -638,13 +684,39 @@ function miz.patch(mission, world)
   end
 
   local ids = { n = maxId(mission) }
+  local taken = {}
+  walkCountries(mission, function(_, country)
+    for _, bucket in ipairs({ "vehicle", "ship", "static", "plane", "helicopter" }) do
+      for _, group in pairs(country[bucket] and type(country[bucket].group) == "table" and country[bucket].group or {}) do
+        if type(group) == "table" then
+          if group.name then taken[group.name] = true end
+          for _, unit in pairs(type(group.units) == "table" and group.units or {}) do
+            if type(unit) == "table" and unit.name then taken[unit.name] = true end
+          end
+        end
+      end
+    end
+  end)
+  -- Two units with one name keep the editor from loading. A group that would repeat a name stays out.
+  local function nameFree(obj)
+    if taken[obj.name] then return false end
+    for _, unit in ipairs(obj.units or {}) do
+      if unit.name and unit.name ~= obj.name and taken[unit.name] then return false end
+    end
+    return true
+  end
+  local function claim(obj)
+    taken[obj.name] = true
+    for _, unit in ipairs(obj.units or {}) do if unit.name then taken[unit.name] = true end end
+  end
   for _, obj in ipairs(world.objects or {}) do
     if type(obj.name) == "string" then
       local group = findGroup(mission, obj.name)
       if group then
         updateGroup(group, obj)
-      else
+      elseif nameFree(obj) then
         local entry = addGroup(mission, obj, ids)
+        if entry then claim(obj) end
         if obj.farp then notePad(entry, obj.name, obj.coalition) end
       end
     end

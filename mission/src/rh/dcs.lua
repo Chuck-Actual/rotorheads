@@ -638,7 +638,8 @@ local function staticDetails(obj)
     shape = shape or tpl.shape_name
   end
   if not category then
-    if typeName and string.find(string.lower(typeName), "crate", 1, true) then category = "Cargos"
+    local lower = string.lower(typeName or "")
+    if string.find(lower, "crate", 1, true) or string.find(lower, "cargo", 1, true) then category = "Cargos"
     else category = "Fortifications" end
   end
   return typeName, category, shape, known.farp == true
